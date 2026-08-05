@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+websockets
+sqlalchemy
+opencv-python
+ultralytics
+shapely
+python-dotenv
+pillow
+requests

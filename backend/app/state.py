@@ -1,0 +1,1 @@
+latest_warn_devices: set[str] = set()
