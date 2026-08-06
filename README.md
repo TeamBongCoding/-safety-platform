@@ -30,6 +30,18 @@ npm --prefix frontend install
 
 Ubuntu에서 가상환경 또는 OpenCV 관련 시스템 라이브러리가 없다면 먼저 `sudo apt install python3-venv libgl1 libglib2.0-0`가 필요할 수 있습니다. 실행 종료는 `Ctrl+C`를 사용합니다.
 
+#### JupyterHub에서 실행
+
+파일 감시 한도가 낮은 JupyterHub에서는 Vite 개발 서버와 Uvicorn 자동 재시작을 사용하지 않고, 프런트엔드를 한 번 빌드한 뒤 FastAPI 하나로 실행합니다.
+
+```bash
+npm --prefix frontend run build
+cd backend
+ANALYSIS_ENABLED=1 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+현재 JupyterHub 주소가 `https://호스트/user/사용자명/lab`이라면 사이트는 `https://호스트/user/사용자명/proxy/8000/`으로 접속합니다. 프런트엔드는 이 프록시 접두사를 자동 감지해 정적 파일, API와 WebSocket 주소에 적용합니다.
+
 안전고리 시뮬레이터는 `.env`의 `HARNESS_SITE_ID`와 `DEVICE_API_KEY`로 현장과 장치를 구분합니다. 실제 인터넷 배포에서는 `COOKIE_SECURE=1`과 HTTPS를 사용하세요.
 
 ### 서버 관리자 만들기

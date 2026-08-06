@@ -1,7 +1,21 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || ''
+function withoutTrailingSlash(value) {
+  return value === '/' ? '' : value.replace(/\/+$/, '')
+}
+
+export function detectJupyterProxyBase(pathname) {
+  const match = pathname.match(/^(.*\/proxy\/(?:absolute\/)?\d+)(?:\/|$)/)
+  return match ? withoutTrailingSlash(match[1]) : ''
+}
+
+const configuredApiBase = import.meta.env.VITE_API_BASE
+export const API_BASE = withoutTrailingSlash(
+  configuredApiBase || detectJupyterProxyBase(window.location.pathname),
+)
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-export const WS_URL = import.meta.env.VITE_WS_BASE || `${wsProtocol}://${window.location.host}/ws`
+const websocketBase = new URL(`${API_BASE || ''}/ws`, window.location.origin)
+websocketBase.protocol = `${wsProtocol}:`
+export const WS_URL = import.meta.env.VITE_WS_BASE || withoutTrailingSlash(websocketBase.toString())
 
 export function cameraUploadUrl(cameraId) {
   const wsOrigin = WS_URL.replace(/\/ws\/?$/, '')
