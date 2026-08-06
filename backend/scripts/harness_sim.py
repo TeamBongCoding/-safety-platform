@@ -3,17 +3,22 @@ o: 고리 열림 / c: 닫힘(승인 태그) / x: 닫힘(미승인 태그) / q: �
 """
 import requests, threading, time
 
-from app.config import BACKEND_BASE_URL, HARNESS_SIM_RFID_TAG
+from app.config import BACKEND_BASE_URL, DEVICE_API_KEY, HARNESS_SIM_RFID_TAG, HARNESS_SITE_ID
 
 
 URL = f"{BACKEND_BASE_URL}/api/harness/state"
-state = {"hook_closed": False, "rfid_tag": None}
+state = {"site_id": HARNESS_SITE_ID, "hook_closed": False, "rfid_tag": None}
 
 
 def sender():
     while True:
         try:
-            r = requests.post(URL, json={"device_id": "worker-1", **state}, timeout=2)
+            r = requests.post(
+                URL,
+                json={"device_id": "worker-1", **state},
+                headers={"X-Device-Key": DEVICE_API_KEY},
+                timeout=2,
+            )
             if r.json().get("vibrate"):
                 print("*** 진동모터 작동! (경고 수신) ***")
         except Exception as e:

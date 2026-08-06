@@ -2,18 +2,17 @@
 from .safety_rules import locate, evaluate, ZONE_TYPES
 from .helmet_logic import match_helmet_to_person
 from . import harness_store
-from .overlay import draw_status, draw_zones
+from .overlay import draw_status
 from ..state import latest_warn_devices
 
 
-def process_frame(frame, detections, zones, w, h, include_status=False):
+def process_frame(frame, detections, zones, w, h, site_id, include_status=False):
     """zones: [{"id","zone_type","polygon"(정규화),"poly"(shapely)}]
     return: (그려진 frame, [이벤트 dict])"""
     persons = [d for d in detections if d["cls"] == "person"]
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
-    hook = harness_store.get("worker-1")["hook_closed"]
+    hook = harness_store.get(site_id, "worker-1")["hook_closed"]
 
-    frame = draw_zones(frame, zones, w, h)
     events = []
     workers = []
     warn_any = False
@@ -48,9 +47,9 @@ def process_frame(frame, detections, zones, w, h, include_status=False):
 
     # ESP32 진동 지시 갱신
     if warn_any:
-        latest_warn_devices.add("worker-1")
+        latest_warn_devices.add((site_id, "worker-1"))
     else:
-        latest_warn_devices.discard("worker-1")
+        latest_warn_devices.discard((site_id, "worker-1"))
 
     if include_status:
         status = {

@@ -1,4 +1,5 @@
 """YOLOv8 추론 래퍼 — Hard Hat Workers 파인튜닝 모델(best.pt) 사용."""
+import threading
 from ultralytics import YOLO
 
 from ..config import HELMET_MODEL_PATH, MODEL_CONFIDENCE, PERSON_MODEL_PATH
@@ -13,10 +14,15 @@ CLASS_MAP = {
 
 class Detector:
     def __init__(self):
+        self._lock = threading.Lock()
         self.helmet_model = YOLO(HELMET_MODEL_PATH)   # head/helmet
         self.person_model = YOLO(PERSON_MODEL_PATH)   # person (COCO)
 
     def detect(self, frame):
+        with self._lock:
+            return self._detect(frame)
+
+    def _detect(self, frame):
         out = []
         r1 = self.helmet_model(frame, conf=MODEL_CONFIDENCE, verbose=False)[0]
         for b in r1.boxes:
