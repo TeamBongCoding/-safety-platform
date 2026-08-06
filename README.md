@@ -10,6 +10,26 @@
 
 로컬 실행은 기존과 같이 `start.ps1`을 사용합니다. 같은 네트워크의 다른 기기는 서버 PC의 IP를 사용해 `http://서버IP:5173`으로 접속합니다. 프론트엔드 개발 서버가 API와 WebSocket 요청을 FastAPI로 전달하므로 브라우저에서는 이 주소 하나만 사용하면 됩니다.
 
+Linux에서는 프로젝트 루트에서 다음과 같이 실행합니다. 최초 한 번만 `chmod +x start.sh`로 실행 권한을 주거나, 권한 변경 없이 `bash start.sh`를 사용할 수 있습니다.
+
+```bash
+chmod +x start.sh
+./start.sh
+
+# AI 영상 분석과 안전고리 시뮬레이터도 함께 실행
+./start.sh --with-analyzer --with-harness
+```
+
+스크립트는 `backend/.venv`, 프로젝트 루트의 `.venv`, 시스템 `python3` 순서로 Python을 찾습니다. 새 Linux 서버에서는 먼저 다음과 같이 의존성을 설치합니다.
+
+```bash
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+npm --prefix frontend install
+```
+
+Ubuntu에서 가상환경 또는 OpenCV 관련 시스템 라이브러리가 없다면 먼저 `sudo apt install python3-venv libgl1 libglib2.0-0`가 필요할 수 있습니다. 실행 종료는 `Ctrl+C`를 사용합니다.
+
 안전고리 시뮬레이터는 `.env`의 `HARNESS_SITE_ID`와 `DEVICE_API_KEY`로 현장과 장치를 구분합니다. 실제 인터넷 배포에서는 `COOKIE_SECURE=1`과 HTTPS를 사용하세요.
 
 ### 서버 관리자 만들기
