@@ -45,9 +45,19 @@ export default function ZoneEditor({
   onStreamLoad,
   onStreamError,
   onRequestError,
+  onRegisterFrameCallback,
 }) {
   const containerRef = useRef(null)
   const imageRef = useRef(null)
+  const [imgSrc, setImgSrc] = useState(onRegisterFrameCallback ? null : streamSrc)
+
+  useEffect(() => {
+    if (!onRegisterFrameCallback) return undefined
+    onRegisterFrameCallback((base64data) => {
+      setImgSrc(`data:image/jpeg;base64,${base64data}`)
+    })
+    return () => onRegisterFrameCallback(null)
+  }, [onRegisterFrameCallback])
   const svgRef = useRef(null)
   const dragRef = useRef(null)
   const visibilityKey = `safety_zone_overlay_${siteId}_${cameraId ?? 'default'}`
@@ -362,10 +372,10 @@ export default function ZoneEditor({
           ref={imageRef}
           key={streamKey}
           className="h-full w-full object-contain"
-          src={streamSrc}
+          src={imgSrc ?? undefined}
           alt={streamAlt}
-          onLoad={handleImageLoad}
-          onError={onStreamError}
+          onLoad={imgSrc ? handleImageLoad : undefined}
+          onError={imgSrc ? onStreamError : undefined}
         />
 
         {displayRect && (

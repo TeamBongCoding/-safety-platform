@@ -103,6 +103,12 @@ if (( WITH_ANALYZER )); then
   export ANALYSIS_ENABLED=1
 fi
 
+echo "이전 프로세스 정리 중..."
+pkill -9 -f "uvicorn app.main:app" 2>/dev/null || true
+pkill -9 -f "vite.*--port" 2>/dev/null || true
+pkill -9 -f "${BACKEND_DIR}/.venv/bin/python" 2>/dev/null || true
+sleep 1
+
 PIDS=()
 PROCESS_GROUPS=()
 LAST_PID=""
@@ -159,7 +165,7 @@ trap cleanup EXIT INT TERM
 start_component \
   "Backend" \
   "$BACKEND_DIR" \
-  "$PYTHON_BIN" -m uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload
+  "$PYTHON_BIN" -m uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload --reload-dir app
 BACKEND_PID="$LAST_PID"
 
 echo "[Backend] 준비 상태 확인 중..."

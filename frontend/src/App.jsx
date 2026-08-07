@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AdminDashboard from './AdminDashboard'
 import BrowserCameraController from './BrowserCameraController'
 import ZoneEditor from './ZoneEditor'
@@ -123,6 +123,10 @@ function Dashboard({ session, setSession }) {
   const [addingSite, setAddingSite] = useState(false)
   const [notice, setNotice] = useState('')
   const [activeCameraId, setActiveCameraId] = useState(null)
+  const frameCallbackRef = useRef(null)
+  const registerFrameCallback = useCallback((fn) => {
+    frameCallbackRef.current = fn
+  }, [])
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
@@ -148,7 +152,14 @@ function Dashboard({ session, setSession }) {
       const summaryUrl = activeCameraId ? `${WS_URL}?camera_id=${activeCameraId}` : WS_URL
       socket = new WebSocket(summaryUrl)
       socket.onopen = () => setConnected(true)
-      socket.onmessage = (event) => setSummary(JSON.parse(event.data))
+      socket.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          if (data.type === 'frame') {
+            frameCallbackRef.current?.(data.data)
+          } else {
+            setSummary(data)
+          }
+        }
       socket.onerror = () => socket.close()
       socket.onclose = (event) => {
         setConnected(false)
@@ -330,6 +341,7 @@ function Dashboard({ session, setSession }) {
               onStreamLoad={() => setStreamReady(true)}
               onStreamError={() => setStreamReady(false)}
               onRequestError={handleUnauthorized}
+              onRegisterFrameCallback={registerFrameCallback}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
               <span>프레임 #{summary?.frame_index ?? 0}</span>

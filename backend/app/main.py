@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import time
 from contextlib import asynccontextmanager
 
@@ -88,15 +89,27 @@ async def ws_endpoint(ws: WebSocket):
         camera.source if camera else None,
     )
     await ws.accept()
+    last_frame_version = -1
+    last_summary_at = 0.0
     try:
         while True:
-            with SessionLocal() as db:
-                if not user_from_token(session_token, db):
-                    await ws.close(code=4401, reason="세션이 만료되었거나 계정이 정지되었습니다.")
-                    return
-            summary = await asyncio.to_thread(analysis_service.get_summary)
-            await ws.send_json(summary)
-            await asyncio.sleep(1)
+            now = time.monotonic()
+            if now - last_summary_at >= 1.0:
+                with SessionLocal() as db:
+                    if not user_from_token(session_token, db):
+                        await ws.close(code=4401, reason="세션이 만료되었거나 계정이 정지되었습니다.")
+                        return
+                summary = await asyncio.to_thread(analysis_service.get_summary)
+                await ws.send_json(summary)
+                last_summary_at = now
+            jpeg, version = analysis_service.get_frame()
+            if jpeg is not None and version != last_frame_version:
+                last_frame_version = version
+                await ws.send_json({
+                    "type": "frame",
+                    "data": base64.b64encode(jpeg).decode(),
+                })
+            await asyncio.sleep(0.033)
     except WebSocketDisconnect:
         pass
 

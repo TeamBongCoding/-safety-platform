@@ -33,7 +33,14 @@ CORS_ORIGINS = _csv(
 HELMET_MODEL_PATH = os.getenv("HELMET_MODEL_PATH", "weights/best.pt")
 PERSON_MODEL_PATH = os.getenv("PERSON_MODEL_PATH", "yolov8n.pt")
 MODEL_CONFIDENCE = float(os.getenv("MODEL_CONFIDENCE", "0.4"))
-FONT_PATH = os.getenv("FONT_PATH", "C:/Windows/Fonts/malgun.ttf")
+_DEFAULT_FONT_PATHS = [
+    "C:/Windows/Fonts/malgun.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+FONT_PATH = os.getenv("FONT_PATH") or next(
+    (p for p in _DEFAULT_FONT_PATHS if Path(p).exists()), _DEFAULT_FONT_PATHS[0]
+)
 TRACK_MAX_MISSED_FRAMES = int(os.getenv("TRACK_MAX_MISSED_FRAMES", "12"))
 REID_MAX_TRANSITION_SECONDS = float(os.getenv("REID_MAX_TRANSITION_SECONDS", "30"))
 REID_MIN_SIMILARITY = float(os.getenv("REID_MIN_SIMILARITY", "0.60"))
