@@ -1,6 +1,5 @@
 ﻿[CmdletBinding()]
 param(
-    [switch]$WithHarness,
     [switch]$WithAnalyzer
 )
 
@@ -42,7 +41,8 @@ if (Test-Path -LiteralPath $envFile) {
 $backendHost = if ($env:BACKEND_HOST) { $env:BACKEND_HOST } else { "127.0.0.1" }
 $backendPort = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "8000" }
 $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "5173" }
-$backendHealthUrl = "http://${backendHost}:${backendPort}/health"
+$backendHealthHost = if ($backendHost -eq "0.0.0.0") { "127.0.0.1" } else { $backendHost }
+$backendHealthUrl = "http://${backendHealthHost}:${backendPort}/health"
 
 $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 
@@ -114,17 +114,8 @@ try {
         (Start-Component `
             -Title "Safety Frontend" `
             -WorkingDirectory $frontendDir `
-            -Command "npm.cmd run dev -- --port $frontendPort")
+            -Command "npm.cmd run dev -- --host 0.0.0.0 --port $frontendPort")
     )
-
-    if ($WithHarness) {
-        $processes.Add(
-            (Start-Component `
-                -Title "Harness Simulator" `
-                -WorkingDirectory $backendDir `
-                -Command "python -m scripts.harness_sim")
-        )
-    }
 
     Write-Host ""
     Write-Host "실행 완료"
