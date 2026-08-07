@@ -21,6 +21,8 @@ const ZONE_TYPES = {
   no_entry: '출입금지',
   fall_risk: '추락위험',
   heavy_equip: '중장비 작업반경',
+  camera_entry: '카메라 입구 ROI',
+  camera_exit: '카메라 출구 ROI',
 }
 
 const clamp = (value) => Math.min(1, Math.max(0, value))

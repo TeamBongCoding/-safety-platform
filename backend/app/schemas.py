@@ -64,7 +64,6 @@ class AdminDeleteRequest(BaseModel):
 class WorkerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=50)
     external_id: str | None = Field(default=None, max_length=100)
-    rfid_tag: str | None = Field(default=None, max_length=100)
 
 
 class WorkerOut(WorkerCreate):
@@ -90,7 +89,13 @@ class CameraOut(CameraCreate):
 
 class ZoneCreate(BaseModel):
     name: str = Field(min_length=1, max_length=50)
-    zone_type: Literal["no_entry", "fall_risk", "heavy_equip"] = "no_entry"
+    zone_type: Literal[
+        "no_entry",
+        "fall_risk",
+        "heavy_equip",
+        "camera_entry",
+        "camera_exit",
+    ] = "no_entry"
     risk_level: Literal["low", "medium", "high", "critical"] = "high"
     description: str = Field(default="", max_length=1000)
     precautions: str = Field(default="", max_length=1000)

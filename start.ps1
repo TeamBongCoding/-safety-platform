@@ -1,6 +1,5 @@
 ﻿[CmdletBinding()]
 param(
-    [switch]$WithHarness,
     [switch]$WithAnalyzer
 )
 
@@ -117,15 +116,6 @@ try {
             -WorkingDirectory $frontendDir `
             -Command "npm.cmd run dev -- --host 0.0.0.0 --port $frontendPort")
     )
-
-    if ($WithHarness) {
-        $processes.Add(
-            (Start-Component `
-                -Title "Harness Simulator" `
-                -WorkingDirectory $backendDir `
-                -Command "python -m scripts.harness_sim")
-        )
-    }
 
     Write-Host ""
     Write-Host "실행 완료"

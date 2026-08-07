@@ -2,7 +2,6 @@
 
 set -Eeuo pipefail
 
-WITH_HARNESS=0
 WITH_ANALYZER=0
 
 usage() {
@@ -11,7 +10,6 @@ Usage: ./start.sh [options]
 
 Options:
   --with-analyzer  Enable live AI analysis (ANALYSIS_ENABLED=1)
-  --with-harness   Start the safety-harness simulator
   -h, --help       Show this help
 EOF
 }
@@ -19,7 +17,6 @@ EOF
 for argument in "$@"; do
   case "$argument" in
     --with-analyzer) WITH_ANALYZER=1 ;;
-    --with-harness) WITH_HARNESS=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $argument" >&2; usage >&2; exit 2 ;;
   esac
@@ -192,13 +189,6 @@ start_component \
   "Frontend" \
   "$FRONTEND_DIR" \
   npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
-
-if (( WITH_HARNESS )); then
-  start_component \
-    "Harness Simulator" \
-    "$BACKEND_DIR" \
-    "$PYTHON_BIN" -m scripts.harness_sim
-fi
 
 echo
 echo "실행 완료"

@@ -7,4 +7,3 @@ ultralytics
 shapely
 python-dotenv
 pillow
-requests

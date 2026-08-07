@@ -25,12 +25,15 @@ function CameraSlot({
   const statsTimerRef = useRef(null)
   const frameCounterRef = useRef(0)
   const encodingRef = useRef(false)
+  const objectUrlRef = useRef(null)
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
   const [uploadFps, setUploadFps] = useState(0)
+  const [testVideo, setTestVideo] = useState(null)
+  const [flipHorizontal, setFlipHorizontal] = useState(true)
 
   const device = devices.find((item) => item.deviceId === selectedDeviceId)
-  const deviceName = device?.label || `카메라 ${index + 1}`
+  const deviceName = testVideo?.name || device?.label || `카메라 ${index + 1}`
 
   const releaseResources = useCallback(() => {
     window.clearInterval(frameTimerRef.current)
@@ -52,6 +55,11 @@ function CameraSlot({
       streamRef.current = null
     }
     if (videoRef.current) videoRef.current.srcObject = null
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+    if (videoRef.current) videoRef.current.removeAttribute('src')
   }, [])
 
   useEffect(() => () => releaseResources(), [releaseResources])
@@ -61,7 +69,8 @@ function CameraSlot({
   }
 
   const findOrCreateCamera = async () => {
-    const storageKey = `safety_browser_camera_${site.id}_${selectedDeviceId}`
+    const sourceKey = testVideo ? `test-video-${index}` : selectedDeviceId
+    const storageKey = `safety_browser_camera_${site.id}_${sourceKey}`
     let savedId = null
     try {
       savedId = Number(window.localStorage.getItem(storageKey)) || null
@@ -74,7 +83,7 @@ function CameraSlot({
     if (!camera) {
       camera = await api('/api/cameras', {
         method: 'POST',
-        body: JSON.stringify({ name: deviceName, source: 'browser' }),
+        body: JSON.stringify({ name: testVideo ? `테스트 영상 ${index + 1}` : deviceName, source: 'browser' }),
       })
       try {
         window.localStorage.setItem(storageKey, String(camera.id))
@@ -106,7 +115,13 @@ function CameraSlot({
         canvas.width = targetWidth
         canvas.height = targetHeight
       }
+      context.save()
+      if (flipHorizontal) {
+        context.translate(targetWidth, 0)
+        context.scale(-1, 1)
+      }
       context.drawImage(video, 0, 0, targetWidth, targetHeight)
+      context.restore()
       encodingRef.current = true
       canvas.toBlob((blob) => {
         encodingRef.current = false
@@ -134,15 +149,15 @@ function CameraSlot({
 
   const startCamera = async () => {
     setError('')
-    if (!selectedDeviceId) {
-      setError('먼저 사용할 카메라를 선택하세요.')
+    if (!selectedDeviceId && !testVideo) {
+      setError('카메라를 선택하거나 테스트 영상을 추가하세요.')
       return
     }
-    if (selectedDeviceId === otherSelectedDeviceId) {
+    if (!testVideo && selectedDeviceId === otherSelectedDeviceId) {
       setError('같은 카메라를 두 슬롯에서 동시에 사용할 수 없습니다.')
       return
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (!testVideo && !navigator.mediaDevices?.getUserMedia) {
       setError('이 주소에서는 카메라를 사용할 수 없습니다. HTTPS 또는 localhost로 접속하세요.')
       return
     }
@@ -150,17 +165,23 @@ function CameraSlot({
     setStatus('requesting')
     reportState('requesting')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: { exact: selectedDeviceId },
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
-        audio: false,
-      })
-      streamRef.current = stream
       const video = videoRef.current
-      video.srcObject = stream
+      if (testVideo) {
+        objectUrlRef.current = URL.createObjectURL(testVideo)
+        video.src = objectUrlRef.current
+        video.loop = true
+      } else {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { exact: selectedDeviceId },
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+          audio: false,
+        })
+        streamRef.current = stream
+        video.srcObject = stream
+      }
       await video.play()
 
       const camera = await findOrCreateCamera()
@@ -190,6 +211,10 @@ function CameraSlot({
           streamRef.current = null
         }
         if (videoRef.current) videoRef.current.srcObject = null
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current)
+          objectUrlRef.current = null
+        }
         setUploadFps(0)
         const nextStatus = event.code === 1000 ? 'idle' : 'error'
         setStatus(nextStatus)
@@ -225,7 +250,7 @@ function CameraSlot({
 
       <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
         <div className="relative aspect-video overflow-hidden rounded-lg border border-slate-800 bg-black">
-          <video ref={videoRef} muted playsInline className="h-full w-full object-cover" />
+          <video ref={videoRef} muted playsInline className={`h-full w-full object-cover ${flipHorizontal ? '-scale-x-100' : ''}`} />
           {!isStreaming && <div className="absolute inset-0 grid place-items-center text-center text-xs text-slate-500">카메라 대기</div>}
           {isStreaming && <span className="absolute left-2 top-2 rounded bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">LIVE</span>}
         </div>
@@ -246,6 +271,28 @@ function CameraSlot({
             ))}
           </select>
 
+          <label className="rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
+            또는 테스트 영상
+            <input
+              type="file"
+              accept="video/*"
+              disabled={isStreaming || isBusy}
+              onChange={(event) => setTestVideo(event.target.files?.[0] ?? null)}
+              className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-cyan-500/15 file:px-2 file:py-1 file:text-cyan-300"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={flipHorizontal}
+              disabled={isStreaming || isBusy}
+              onChange={(event) => setFlipHorizontal(event.target.checked)}
+              className="h-4 w-4 accent-cyan-500"
+            />
+            좌우 반전 보정
+          </label>
+
           <div className="flex flex-wrap gap-2">
             {isStreaming ? (
               <>
@@ -253,14 +300,14 @@ function CameraSlot({
                 <button onClick={() => onMonitor(index)} disabled={selectedForMonitoring} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-default disabled:opacity-50">관제 화면에서 보기</button>
               </>
             ) : (
-              <button onClick={startCamera} disabled={isBusy || !selectedDeviceId || selectedDeviceId === otherSelectedDeviceId} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
-                {isBusy ? '연결 중...' : '카메라 시작'}
+              <button onClick={startCamera} disabled={isBusy || (!selectedDeviceId && !testVideo) || (!testVideo && selectedDeviceId === otherSelectedDeviceId)} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+                {isBusy ? '연결 중...' : testVideo ? '테스트 영상 시작' : '카메라 시작'}
               </button>
             )}
           </div>
 
           <p className="text-xs text-slate-400">
-            {isStreaming ? `${deviceName} · 서버 전송 ${uploadFps} FPS` : deviceName}
+            {isStreaming ? `${deviceName} · 서버 전송 ${uploadFps} FPS` : testVideo ? `테스트 영상 · ${testVideo.name}` : deviceName}
           </p>
         </div>
       </div>
@@ -369,11 +416,11 @@ export default function BrowserCameraController({ site, onCameraChange }) {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-semibold text-white">클라이언트 라이브 카메라</h2>
+            <h2 className="font-semibold text-white">카메라 · 테스트 영상 입력</h2>
             <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">최대 2대</span>
             <span className="text-xs text-emerald-300">전송 중 {slotStates.filter((item) => item.status === 'streaming').length}대</span>
           </div>
-          <p className="mt-1 text-sm text-slate-400">내장·USB 카메라를 동시에 서버로 보내 분석하고, 관제 화면에 표시할 카메라를 선택합니다.</p>
+          <p className="mt-1 text-sm text-slate-400">카메라 2대, 테스트 영상 2개 또는 혼합 입력을 동시에 분석하고 관제 화면을 선택합니다.</p>
           {!window.isSecureContext && window.location.hostname !== 'localhost' && (
             <p className="mt-1 text-xs text-amber-300">원격 기기 카메라는 HTTPS 주소에서만 사용할 수 있습니다.</p>
           )}
@@ -383,8 +430,7 @@ export default function BrowserCameraController({ site, onCameraChange }) {
         </button>
       </div>
 
-      {devices.length ? (
-        <div className="grid gap-3 xl:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
           {Array.from({ length: CAMERA_LIMIT }, (_, index) => (
             <CameraSlot
               key={index}
@@ -399,12 +445,7 @@ export default function BrowserCameraController({ site, onCameraChange }) {
               onStateChange={handleSlotStateChange}
             />
           ))}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-400">
-          카메라 검색을 눌러 이 기기의 내장·USB 카메라를 불러오세요.
-        </div>
-      )}
+      </div>
       {discoveryError && <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{discoveryError}</p>}
     </section>
   )

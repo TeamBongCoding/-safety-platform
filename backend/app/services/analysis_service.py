@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from ..config import ANALYSIS_ENABLED, PROJECT_ROOT, VIDEO_SOURCE
 from ..database import SessionLocal
 from ..models import Event, Zone
-from . import harness_store
+from .person_tracking import CameraPersonTracker, GlobalIdentityManager
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
 INFER_EVERY = 3
@@ -23,10 +23,18 @@ ZONE_REFRESH_SECONDS = 1
 
 
 class AnalysisService:
-    def __init__(self, site_id: int, camera_id: int | None = None, external: bool = False):
+    def __init__(
+        self,
+        site_id: int,
+        identity_manager: GlobalIdentityManager,
+        camera_id: int | None = None,
+        external: bool = False,
+    ):
         self.site_id = site_id
         self.camera_id = camera_id
         self.external = external
+        self.identity_manager = identity_manager
+        self.person_tracker = CameraPersonTracker(camera_id, identity_manager)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._frame_ready = threading.Event()
@@ -36,6 +44,7 @@ class AnalysisService:
         self._external_connected = False
         self._frame_version = 0
         self._event_last_seen: dict[tuple[str, int | None], float] = {}
+        self._zones: list[dict] = []
         self._status = {
             "running": False,
             "stage": "stopped",
@@ -45,7 +54,10 @@ class AnalysisService:
             "processing_fps": 0.0,
             "worker_count": 0,
             "no_helmet_count": 0,
-            "unsecured_count": 0,
+            "transition_candidate_count": 0,
+            "entry_roi_count": 0,
+            "exit_roi_count": 0,
+            "reid_backend": None,
             "workers": [],
             "last_error": None,
         }
@@ -102,7 +114,7 @@ class AnalysisService:
             self._status.update({
                 "worker_count": 0,
                 "no_helmet_count": 0,
-                "unsecured_count": 0,
+                "transition_candidate_count": 0,
                 "workers": [],
             })
         self._set_status(
@@ -114,6 +126,8 @@ class AnalysisService:
         return True
 
     def detach_external_camera(self):
+        exit_zones = [zone for zone in self._zones if zone["zone_type"] == "camera_exit"]
+        self.person_tracker.flush(exit_zones)
         with self._lock:
             self._external_connected = False
             self._pending_jpeg = None
@@ -144,7 +158,6 @@ class AnalysisService:
         with self._lock:
             snapshot = dict(self._status)
             snapshot["workers"] = [dict(worker) for worker in self._status["workers"]]
-        snapshot["harness"] = harness_store.get(self.site_id, "worker-1")
         return snapshot
 
     def get_summary(self):
@@ -165,7 +178,10 @@ class AnalysisService:
             "timestamp": datetime.now().isoformat(),
             "worker_count": snapshot["worker_count"],
             "no_helmet_count": snapshot["no_helmet_count"],
-            "unsecured_count": snapshot["unsecured_count"],
+            "transition_candidate_count": snapshot["transition_candidate_count"],
+            "entry_roi_count": snapshot["entry_roi_count"],
+            "exit_roi_count": snapshot["exit_roi_count"],
+            "reid_backend": snapshot["reid_backend"],
             "violations_today": violations_today,
             "analysis_running": snapshot["running"],
             "analysis_stage": snapshot["stage"],
@@ -173,7 +189,6 @@ class AnalysisService:
             "frame_index": snapshot["frame_index"],
             "processing_fps": snapshot["processing_fps"],
             "workers": snapshot["workers"],
-            "harness": snapshot["harness"],
             "last_error": snapshot["last_error"],
         }
 
@@ -202,6 +217,7 @@ class AnalysisService:
                     "polygon": polygon,
                     "poly": Polygon(polygon),
                 })
+        self._zones = zones
         return zones
 
     def _save_events(self, events):
@@ -277,7 +293,8 @@ class AnalysisService:
                     zones,
                     width,
                     height,
-                    self.site_id,
+                    self.person_tracker,
+                    self.identity_manager,
                     include_status=True,
                 )
 
@@ -336,6 +353,7 @@ class AnalysisService:
             rate_started_at = time.monotonic()
             rate_frames = 0
             processing_fps = 0.0
+            detections = []
 
             while not self._stop_event.is_set():
                 now = time.monotonic()
@@ -360,7 +378,8 @@ class AnalysisService:
                 if frame is None:
                     continue
 
-                detections = detector.detect(frame)
+                if frame_index % INFER_EVERY == 0:
+                    detections = detector.detect(frame)
                 height, width = frame.shape[:2]
                 rendered, events, frame_status = process_frame(
                     frame,
@@ -368,7 +387,8 @@ class AnalysisService:
                     zones,
                     width,
                     height,
-                    self.site_id,
+                    self.person_tracker,
+                    self.identity_manager,
                     include_status=True,
                 )
 
@@ -413,6 +433,7 @@ class AnalysisRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._services: dict[tuple[int, int | None], AnalysisService] = {}
+        self._identity_managers: dict[int, GlobalIdentityManager] = {}
 
     def get(
         self,
@@ -425,7 +446,15 @@ class AnalysisRegistry:
         with self._lock:
             service = self._services.get(key)
             if service is None:
-                service = AnalysisService(site_id, camera_id=camera_id, external=external)
+                identity_manager = self._identity_managers.setdefault(
+                    site_id, GlobalIdentityManager()
+                )
+                service = AnalysisService(
+                    site_id,
+                    identity_manager,
+                    camera_id=camera_id,
+                    external=external,
+                )
                 self._services[key] = service
         if external:
             service.start_external()

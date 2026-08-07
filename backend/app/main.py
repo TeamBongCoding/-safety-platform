@@ -12,7 +12,7 @@ from .config import CORS_ORIGINS, PROJECT_ROOT, SESSION_COOKIE_NAME
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Camera, Site
-from .routers import admin, analysis, auth, events, harness, resources, sites, zones
+from .routers import admin, analysis, auth, events, resources, sites, zones
 from .services.analysis_service import analysis_registry
 
 migrate_legacy_schema(engine)
@@ -41,7 +41,6 @@ app.include_router(sites.router)
 app.include_router(resources.router)
 app.include_router(events.router)
 app.include_router(zones.router)
-app.include_router(harness.router)
 app.include_router(analysis.router)
 
 

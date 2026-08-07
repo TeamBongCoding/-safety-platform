@@ -55,7 +55,6 @@ class Worker(Base):
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
     name: Mapped[str] = mapped_column(String(50))
     external_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    rfid_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

@@ -10,14 +10,14 @@ FONT = ImageFont.truetype(FONT_PATH, 18)
 LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 255)}
 
 
-def draw_status(frame, box, helmet_on, hook_closed, zone_label, level):
+def draw_status(frame, box, helmet_on, zone_label, level, global_person_id, local_track_id):
     x1, y1, x2, y2 = map(int, box)
     color = LEVEL_COLORS[level]
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
     lines = [
+        f"Global {global_person_id} · Camera Local {local_track_id}",
         f"헬멧 {'착용' if helmet_on else '미착용'}",
-        f"고리 {'체결' if hook_closed else '미체결'}",
     ]
     if zone_label:
         lines.append(f"구역: {zone_label}")

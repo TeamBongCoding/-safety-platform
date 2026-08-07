@@ -304,7 +304,7 @@ function Dashboard({ session, setSession }) {
         <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MetricCard label="현재 작업 인원" value={summary?.worker_count} unit="명" tone="cyan" />
           <MetricCard label="안전모 미착용" value={summary?.no_helmet_count} unit="명" tone="red" />
-          <MetricCard label="고리 미체결" value={summary?.unsecured_count} unit="명" tone="amber" />
+          <MetricCard label="카메라 전환 대기" value={summary?.transition_candidate_count} unit="명" tone="amber" />
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
 
@@ -313,7 +313,7 @@ function Dashboard({ session, setSession }) {
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
               <div>
                 <h2 className="font-semibold text-white">현장 분석 영상</h2>
-                <p className="text-xs text-slate-500">{currentSite?.name} · {activeCameraId ? '클라이언트 라이브 카메라' : '기본 분석 영상'} · 안전모 · 안전고리 · 위험구역 판정</p>
+                <p className="text-xs text-slate-500">{currentSite?.name} · {activeCameraId ? '클라이언트 라이브 카메라' : '기본 분석 영상'} · 사람 추적 · Re-ID · 안전모 · 위험구역 판정</p>
               </div>
               <span className="rounded-md bg-red-500/15 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">LIVE</span>
             </div>
@@ -333,7 +333,9 @@ function Dashboard({ session, setSession }) {
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
               <span>프레임 #{summary?.frame_index ?? 0}</span>
-              <span>고리 장치 {summary?.harness?.online ? '온라인' : '오프라인'}</span>
+              <span className={(summary?.entry_roi_count ?? 0) > 0 && (summary?.exit_roi_count ?? 0) > 0 ? '' : 'text-amber-300'}>
+                {activeCameraId ? `카메라 #${activeCameraId}` : '기본 영상'} · {summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · 입구 ROI {summary?.entry_roi_count ?? 0} · 출구 ROI {summary?.exit_roi_count ?? 0}
+              </span>
             </div>
           </div>
 
@@ -436,14 +438,23 @@ function WorkerCard({ worker }) {
   return (
     <article className={`rounded-xl border p-4 ${style}`}>
       <div className="mb-3 flex items-center justify-between">
-        <span className="font-semibold text-white">{worker.id}</span>
+        <span className="font-semibold text-white">Global ID · {worker.global_person_id ?? worker.id}</span>
         <span className="text-xs font-bold uppercase tracking-wider">{worker.level}</span>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
         <StatusPill label="안전모" ok={worker.helmet_on} />
-        <StatusPill label="안전고리" ok={worker.hook_closed} />
+        <span className="rounded-md bg-slate-950/30 px-2 py-1.5 text-slate-300">카메라 내부 ID · {worker.local_track_id}</span>
       </div>
       <p className="mt-3 text-xs text-slate-400">위치 · {worker.zone}</p>
+      <p className="mt-1 text-xs text-slate-400">객체 품질 · {Math.round((worker.image_quality ?? 0) * 100)}%</p>
+      {worker.camera_transition && (
+        <p className="mt-2 rounded-md bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200">
+          카메라 #{worker.camera_transition.matched_from_camera_id}에서 연결 · Re-ID {Math.round(worker.camera_transition.reid_similarity * 100)}% · 종합 {Math.round(worker.camera_transition.match_score * 100)}% · {worker.camera_transition.transition_seconds}초
+        </p>
+      )}
+      {worker.reid_pending && !worker.camera_transition && (
+        <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">입구 ROI 전환 후보 비교 중</p>
+      )}
       {worker.reasons?.length > 0 && <p className="mt-1 text-xs font-medium">{worker.reasons.join(' · ')}</p>}
     </article>
   )
