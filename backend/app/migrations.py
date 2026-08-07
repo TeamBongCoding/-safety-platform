@@ -3,6 +3,12 @@ from sqlalchemy import inspect
 
 def migrate_legacy_schema(engine) -> None:
     """create_all이 추가하지 못하는 기존 SQLite 컬럼을 안전하게 보강한다."""
+    # These statements and PRAGMA are only valid for databases created by
+    # older local SQLite versions. PostgreSQL/Supabase is created from the
+    # SQLAlchemy metadata in app.main instead.
+    if engine.dialect.name != "sqlite":
+        return
+
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 
