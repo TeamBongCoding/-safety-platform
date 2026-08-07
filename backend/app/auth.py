@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import COOKIE_SECURE, SESSION_COOKIE_NAME, SESSION_DAYS
+from .config import COOKIE_SAMESITE, COOKIE_SECURE, SESSION_COOKIE_NAME, SESSION_DAYS
 from .database import get_db
 from .models import LoginSession, Site, User
 
@@ -65,7 +65,7 @@ def start_session(response: Response, db: Session, user: User) -> None:
         max_age=SESSION_DAYS * 24 * 60 * 60,
         httponly=True,
         secure=COOKIE_SECURE,
-        samesite="lax",
+        samesite=COOKIE_SAMESITE,
         path="/",
     )
 
@@ -77,7 +77,13 @@ def end_session(response: Response, request: Request, db: Session) -> None:
         if session:
             db.delete(session)
             db.commit()
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=COOKIE_SECURE,
+        httponly=True,
+        samesite=COOKIE_SAMESITE,
+    )
 
 
 def user_from_token(token: str | None, db: Session) -> User | None:

@@ -25,6 +25,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safety.db")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none")
+if COOKIE_SAMESITE == "none" and not COOKIE_SECURE:
+    raise ValueError("COOKIE_SECURE=1 is required when COOKIE_SAMESITE=none")
 CORS_ORIGINS = _csv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
