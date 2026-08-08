@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from ..config import ANALYSIS_ENABLED, PROJECT_ROOT, VIDEO_SOURCE
 from ..database import SessionLocal
-from ..models import Event, Zone
+from ..models import Event, Site, User, Zone
 from .person_tracking import CameraPersonTracker, GlobalIdentityManager
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
@@ -242,6 +242,13 @@ class AnalysisService:
             return
 
         with SessionLocal() as db:
+            owner_role = db.scalar(
+                select(User.role)
+                .join(Site, Site.user_id == User.id)
+                .where(Site.id == self.site_id)
+            )
+            if owner_role == "platform_admin":
+                return
             db.add_all(new_events)
             db.commit()
 

@@ -3,7 +3,6 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import DATABASE_URL
 
-
 engine_options = {
     "pool_pre_ping": True,
 }
@@ -36,7 +35,6 @@ SessionLocal = sessionmaker(
     autoflush=False,
     expire_on_commit=False,
 )
-
 
 class Base(DeclarativeBase):
     pass

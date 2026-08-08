@@ -38,11 +38,31 @@ if (Test-Path -LiteralPath $envFile) {
     }
 }
 
-$backendHost = if ($env:BACKEND_HOST) { $env:BACKEND_HOST } else { "127.0.0.1" }
+$backendHost = if ($env:BACKEND_HOST) { $env:BACKEND_HOST } else { "0.0.0.0" }
 $backendPort = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "8000" }
 $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "5173" }
 $backendHealthHost = if ($backendHost -eq "0.0.0.0") { "127.0.0.1" } else { $backendHost }
 $backendHealthUrl = "http://${backendHealthHost}:${backendPort}/health"
+
+function Get-TailscaleIPv4 {
+    $tailscaleCandidates = @(
+        (Get-Command "tailscale.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+        (Join-Path $env:ProgramFiles "Tailscale\tailscale.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+    foreach ($tailscalePath in $tailscaleCandidates) {
+        try {
+            $address = (& $tailscalePath ip -4 2>$null | Select-Object -First 1).Trim()
+            if ($address -match '^100\.') {
+                return $address
+            }
+        }
+        catch {
+            # Tailscale이 설치되어 있지 않거나 로그아웃 상태면 로컬 주소만 표시한다.
+        }
+    }
+    return $null
+}
 
 $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 
@@ -120,8 +140,15 @@ try {
     Write-Host ""
     Write-Host "실행 완료"
     Write-Host "Frontend : http://localhost:$frontendPort"
-    Write-Host "Backend  : http://${backendHost}:$backendPort"
-    Write-Host "API Docs : http://${backendHost}:$backendPort/docs"
+    Write-Host "Backend  : http://${backendHealthHost}:$backendPort"
+    Write-Host "API Docs : http://${backendHealthHost}:$backendPort/docs"
+    $tailscaleIp = Get-TailscaleIPv4
+    if ($tailscaleIp) {
+        Write-Host "Tailscale: http://${tailscaleIp}:$frontendPort"
+    }
+    else {
+        Write-Host "Tailscale: 주소를 찾지 못했습니다. Tailscale 실행/로그인 상태를 확인하세요."
+    }
     Write-Host ""
     Read-Host "모든 프로세스를 종료하려면 Enter를 누르세요" | Out-Null
 }

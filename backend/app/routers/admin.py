@@ -1,5 +1,6 @@
 import json
-from datetime import date, datetime, time as datetime_time
+from datetime import date, datetime, time as datetime_time, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, or_, select, update
@@ -256,6 +257,32 @@ def list_all_events(
         "user_id": user.id if user else None,
         "company_name": user.company_name if user else "미지정",
     } for event, site, user in rows]
+
+
+@router.delete("/events")
+def delete_events(
+    scope: Literal["today", "all"] = "today",
+    admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+):
+    statement = delete(Event)
+    if scope == "today":
+        start_of_day = datetime.combine(date.today(), datetime_time.min)
+        statement = statement.where(
+            Event.timestamp >= start_of_day,
+            Event.timestamp < start_of_day + timedelta(days=1),
+        )
+
+    result = db.execute(statement)
+    deleted_count = result.rowcount or 0
+    add_audit(
+        db,
+        admin,
+        f"events_deleted_{scope}",
+        details={"scope": scope, "deleted_count": deleted_count},
+    )
+    db.commit()
+    return {"scope": scope, "deleted_count": deleted_count}
 
 
 @router.get("/audit-logs")

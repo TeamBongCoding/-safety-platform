@@ -12,7 +12,7 @@ from .config import CORS_ORIGINS, PROJECT_ROOT, SESSION_COOKIE_NAME
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Camera, Site
-from .routers import admin, analysis, auth, events, resources, sites, zones
+from .routers import admin, analysis, auth, events, rankings, resources, sites, zones
 from .services.analysis_service import analysis_registry
 
 migrate_legacy_schema(engine)
@@ -40,6 +40,7 @@ app.include_router(admin.router)
 app.include_router(sites.router)
 app.include_router(resources.router)
 app.include_router(events.router)
+app.include_router(rankings.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
 
@@ -62,6 +63,9 @@ async def ws_endpoint(ws: WebSocket):
         user = user_from_token(session_token, db)
         if not user:
             await ws.close(code=4401, reason="로그인이 필요합니다.")
+            return
+        if user.role == "platform_admin":
+            await ws.close(code=4403, reason="서버 관리자 계정은 영상 분석을 사용하지 않습니다.")
             return
         site = db.scalar(
             select(Site).where(
@@ -108,6 +112,9 @@ async def camera_upload_endpoint(ws: WebSocket, camera_id: int):
         user = user_from_token(session_token, db)
         if not user:
             await ws.close(code=4401, reason="로그인이 필요합니다.")
+            return
+        if user.role == "platform_admin":
+            await ws.close(code=4403, reason="서버 관리자 계정은 영상 분석을 사용하지 않습니다.")
             return
         site = db.scalar(
             select(Site).where(Site.id == user.current_site_id, Site.user_id == user.id)
