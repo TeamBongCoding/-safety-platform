@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,10 +19,35 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
     )
 
 
+def normalize_database_url(value: str) -> str:
+    """Select psycopg v3 when a provider returns a generic PostgreSQL URL."""
+    if value.startswith("postgres://"):
+        return value.replace("postgres://", "postgresql+psycopg://", 1)
+    if value.startswith("postgresql://"):
+        return value.replace("postgresql://", "postgresql+psycopg://", 1)
+    return value
+
+
 ANALYSIS_ENABLED = os.getenv("ANALYSIS_ENABLED", "0") == "1"
 VIDEO_SOURCE = os.getenv("VIDEO_SOURCE")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safety.db")
+if os.getenv("DB_HOST"):
+    _db_password = os.getenv("DB_PASSWORD")
+    if not _db_password:
+        raise ValueError("DB_PASSWORD is required when DB_HOST is configured")
+    DATABASE_URL = URL.create(
+        drivername="postgresql+psycopg",
+        username=os.getenv("DB_USER", "postgres"),
+        password=_db_password,
+        host=os.environ["DB_HOST"],
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "postgres"),
+    )
+else:
+    # Accept copied Supabase URLs as well as SQLAlchemy's explicit driver URL.
+    DATABASE_URL = normalize_database_url(
+        os.getenv("DATABASE_URL", "sqlite:///./safety.db")
+    )
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
@@ -38,7 +64,12 @@ CORS_ORIGINS = _csv(
 HELMET_MODEL_PATH = os.getenv("HELMET_MODEL_PATH", "weights/best.pt")
 PERSON_MODEL_PATH = os.getenv("PERSON_MODEL_PATH", "yolov8n.pt")
 MODEL_CONFIDENCE = float(os.getenv("MODEL_CONFIDENCE", "0.4"))
-FONT_PATH = os.getenv("FONT_PATH", "C:/Windows/Fonts/malgun.ttf")
+_default_font_path = (
+    "C:/Windows/Fonts/malgun.ttf"
+    if os.name == "nt"
+    else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+)
+FONT_PATH = os.getenv("FONT_PATH", _default_font_path)
 TRACK_MAX_MISSED_FRAMES = int(os.getenv("TRACK_MAX_MISSED_FRAMES", "12"))
 REID_MAX_TRANSITION_SECONDS = float(os.getenv("REID_MAX_TRANSITION_SECONDS", "30"))
 REID_MIN_SIMILARITY = float(os.getenv("REID_MIN_SIMILARITY", "0.60"))

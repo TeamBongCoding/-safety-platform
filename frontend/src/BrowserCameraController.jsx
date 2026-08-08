@@ -4,7 +4,7 @@ import { api, cameraUploadUrl } from './api'
 const CAMERA_LIMIT = 2
 const FRAME_INTERVAL_MS = 125
 const MAX_BUFFERED_BYTES = 1_000_000
-const EMPTY_SLOT = { cameraId: null, name: '', status: 'idle', uploadFps: 0 }
+const EMPTY_SLOT = { cameraId: null, name: '', status: 'idle', uploadFps: 0, inputType: 'none' }
 
 function CameraSlot({
   index,
@@ -65,7 +65,13 @@ function CameraSlot({
   useEffect(() => () => releaseResources(), [releaseResources])
 
   const reportState = (nextStatus, cameraId = null, fps = 0, name = deviceName) => {
-    onStateChange(index, { cameraId, name, status: nextStatus, uploadFps: fps })
+    onStateChange(index, {
+      cameraId,
+      name,
+      status: nextStatus,
+      uploadFps: fps,
+      inputType: testVideo ? 'recorded' : 'live',
+    })
   }
 
   const findOrCreateCamera = async () => {
@@ -327,10 +333,10 @@ export default function BrowserCameraController({ site, onCameraChange }) {
   const slotStatesRef = useRef(slotStates)
   const selectedCameraIdRef = useRef(null)
 
-  const chooseMonitoringCamera = useCallback((cameraId) => {
+  const chooseMonitoringCamera = useCallback((cameraId, inputType = 'recorded', name = '기본 녹화 영상') => {
     selectedCameraIdRef.current = cameraId
     setSelectedCameraId(cameraId)
-    onCameraChange(cameraId)
+    onCameraChange(cameraId, { kind: inputType, name })
   }, [onCameraChange])
 
   const handleSlotStateChange = useCallback((index, nextState) => {
@@ -340,20 +346,26 @@ export default function BrowserCameraController({ site, onCameraChange }) {
     setSlotStates(next)
 
     if (nextState.status === 'streaming' && nextState.cameraId && !selectedCameraIdRef.current) {
-      chooseMonitoringCamera(nextState.cameraId)
+      chooseMonitoringCamera(nextState.cameraId, nextState.inputType, nextState.name)
     } else if (
       previous.cameraId &&
       selectedCameraIdRef.current === previous.cameraId &&
       nextState.status !== 'streaming'
     ) {
       const replacement = next.find((item) => item.status === 'streaming' && item.cameraId)
-      chooseMonitoringCamera(replacement?.cameraId ?? null)
+      chooseMonitoringCamera(
+        replacement?.cameraId ?? null,
+        replacement?.inputType ?? 'recorded',
+        replacement?.name ?? '기본 녹화 영상',
+      )
     }
   }, [chooseMonitoringCamera])
 
   const handleMonitor = (index) => {
     const slot = slotStatesRef.current[index]
-    if (slot.status === 'streaming' && slot.cameraId) chooseMonitoringCamera(slot.cameraId)
+    if (slot.status === 'streaming' && slot.cameraId) {
+      chooseMonitoringCamera(slot.cameraId, slot.inputType, slot.name)
+    }
   }
 
   const handleDeviceChange = (index, deviceId) => {

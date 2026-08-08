@@ -2,7 +2,8 @@ fastapi
 uvicorn[standard]
 websockets
 sqlalchemy
-opencv-python
+psycopg[binary]
+opencv-python-headless
 ultralytics
 shapely
 python-dotenv
