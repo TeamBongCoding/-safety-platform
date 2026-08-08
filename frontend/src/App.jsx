@@ -257,6 +257,21 @@ function Dashboard({ session, setSession, onShowRanking }) {
     return '분석 중지됨'
   }, [activeInput.kind, connected, summary])
 
+  const unresolvedEvents = useMemo(
+    () => events.filter((item) => !item.resolved),
+    [events],
+  )
+
+  const topWorkerAlert = useMemo(() => {
+    const workers = summary?.workers ?? []
+    if (!workers.length) return null
+    const byLevel = { alert: 3, warn: 2, ok: 1 }
+    return workers.reduce((current, worker) => {
+      if (!current) return worker
+      return (byLevel[worker.level] ?? 0) > (byLevel[current.level] ?? 0) ? worker : current
+    }, null)
+  }, [summary?.workers])
+
   const isRecordedVideo = activeInput.kind === 'recorded'
   const videoSourceLabel = isRecordedVideo
     ? activeCameraId ? `테스트 녹화 영상 · ${activeInput.name}` : '서버 기본 녹화 영상'
@@ -264,7 +279,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
-      <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1600px] px-3 py-4 sm:px-6 sm:py-5 lg:px-8">
         <header className="mb-5 border-b border-slate-800 pb-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -279,13 +294,13 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 id="site-select"
                 value={currentSite?.id ?? ''}
                 onChange={(event) => selectSite(Number(event.target.value))}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                className="min-h-11 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
               >
                 {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
               </select>
-              <button onClick={() => setAddingSite((value) => !value)} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
-              <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
-              <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
+              <button onClick={() => setAddingSite((value) => !value)} className="min-h-11 rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
+              <button onClick={onShowRanking} className="min-h-11 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
+              <button onClick={logout} className="min-h-11 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
             </div>
           </div>
 
@@ -297,13 +312,45 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 placeholder="새 현장명"
                 maxLength="100"
                 autoFocus
-                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
               />
-              <button className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">추가</button>
+              <button className="min-h-11 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">추가</button>
             </form>
           )}
           {notice && <p className="mt-3 text-sm text-cyan-300">{notice}</p>}
         </header>
+
+        <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.2fr_1fr]">
+          <article className={`rounded-xl border px-4 py-3 ${unresolvedEvents.length ? 'border-red-500/35 bg-red-500/10' : 'border-emerald-500/30 bg-emerald-500/10'}`}>
+            <p className={`text-xs font-semibold tracking-[0.18em] ${unresolvedEvents.length ? 'text-red-300' : 'text-emerald-300'}`}>핵심 안전 경고</p>
+            <p className="mt-2 text-base font-semibold text-white">
+              {unresolvedEvents.length
+                ? `미조치 위험 ${unresolvedEvents.length}건이 있습니다.`
+                : '현재 미조치 위험이 없습니다.'}
+            </p>
+            <p className="mt-1 text-xs text-slate-300">
+              최근 경고를 확인하고 필요한 경우 즉시 조치 처리 버튼을 눌러주세요.
+            </p>
+          </article>
+          <article className={`rounded-xl border px-4 py-3 ${topWorkerAlert?.level === 'alert' ? 'border-red-500/35 bg-red-500/10' : topWorkerAlert?.level === 'warn' ? 'border-amber-500/35 bg-amber-500/10' : 'border-slate-700 bg-slate-900/80'}`}>
+            <p className="text-xs font-semibold tracking-[0.18em] text-cyan-300">작업자 상태 우선 확인</p>
+            {topWorkerAlert ? (
+              <>
+                <p className="mt-2 text-base font-semibold text-white">
+                  Global ID {topWorkerAlert.global_person_id ?? topWorkerAlert.id}
+                </p>
+                <p className="mt-1 text-sm text-slate-200">
+                  위치 {topWorkerAlert.zone} · 안전모 {topWorkerAlert.helmet_on ? '정상' : '미착용'}
+                </p>
+                {topWorkerAlert.reasons?.length > 0 && (
+                  <p className="mt-1 text-xs text-slate-300">{topWorkerAlert.reasons.join(' · ')}</p>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-slate-300">현재 감지된 작업자가 없습니다.</p>
+            )}
+          </article>
+        </section>
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -351,7 +398,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
         </section>
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
-          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20">
+          <div className="order-2 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20 xl:order-1">
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
               <div>
                 <h2 className="font-semibold text-white">현장 분석 영상</h2>
@@ -381,7 +428,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
             </div>
           </div>
 
-          <aside className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <aside className="order-1 rounded-2xl border border-slate-800 bg-slate-900 p-4 sm:p-5 xl:order-2">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-white">작업자 상태</h2>
@@ -403,9 +450,26 @@ function Dashboard({ session, setSession, onShowRanking }) {
               <h2 className="font-semibold text-white">최근 안전 이벤트</h2>
               <p className="text-xs text-slate-500">{currentSite?.name}에 저장된 분석 경고 이력</p>
             </div>
-            <button onClick={loadEvents} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-500 hover:text-cyan-300">새로고침</button>
+            <button onClick={loadEvents} className="min-h-10 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-500 hover:text-cyan-300">새로고침</button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="space-y-2 p-3 md:hidden">
+            {events.length ? events.map((event) => (
+              <article key={event.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                <p className="text-xs text-slate-500">{formatDate(event.timestamp)}</p>
+                <p className="mt-1 text-sm font-semibold text-red-300">{eventLabels[event.event_type] ?? event.event_type}</p>
+                <p className="mt-1 text-xs text-slate-300">위치 {event.zone_id ? `구역 ${event.zone_id}` : '일반구역'} · 신뢰도 {Math.round(event.confidence * 100)}%</p>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className={event.resolved ? 'text-xs text-emerald-400' : 'text-xs text-red-300'}>{event.resolved ? '조치 완료' : '미조치'}</span>
+                  {!event.resolved && (
+                    <button onClick={() => resolveEvent(event.id)} className="min-h-10 rounded-md bg-red-500/15 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/25">
+                      조치 처리
+                    </button>
+                  )}
+                </div>
+              </article>
+            )) : <p className="px-2 py-8 text-center text-sm text-slate-500">현재 현장에 저장된 안전 이벤트가 없습니다.</p>}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-slate-950/50 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
@@ -425,7 +489,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
                     <td className="px-5 py-3 tabular-nums">{Math.round(event.confidence * 100)}%</td>
                     <td className="px-5 py-3">
                       {event.resolved ? <span className="text-emerald-400">조치 완료</span> : (
-                        <button onClick={() => resolveEvent(event.id)} className="rounded-md bg-red-500/15 px-2.5 py-1 text-xs text-red-300 hover:bg-red-500/25">조치 처리</button>
+                        <button onClick={() => resolveEvent(event.id)} className="min-h-10 rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-300 hover:bg-red-500/25">조치 처리</button>
                       )}
                     </td>
                   </tr>
@@ -478,12 +542,12 @@ function MetricCard({ label, value, unit, tone }) {
 function WorkerCard({ worker }) {
   const style = levelStyles[worker.level] ?? levelStyles.ok
   return (
-    <article className={`rounded-xl border p-4 ${style}`}>
+    <article className={`rounded-xl border p-3 sm:p-4 ${style}`}>
       <div className="mb-3 flex items-center justify-between">
         <span className="font-semibold text-white">Global ID · {worker.global_person_id ?? worker.id}</span>
         <span className="text-xs font-bold uppercase tracking-wider">{worker.level}</span>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         <StatusPill label="안전모" ok={worker.helmet_on} />
         <span className="rounded-md bg-slate-950/30 px-2 py-1.5 text-slate-300">카메라 내부 ID · {worker.local_track_id}</span>
       </div>

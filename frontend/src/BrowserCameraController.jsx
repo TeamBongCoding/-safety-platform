@@ -267,7 +267,7 @@ function CameraSlot({
             onChange={(event) => onDeviceChange(index, event.target.value)}
             disabled={isStreaming || isBusy}
             aria-label={`카메라 ${index + 1} 장치 선택`}
-            className="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500 disabled:opacity-60"
+            className="min-h-11 min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500 disabled:opacity-60"
           >
             <option value="">장치를 선택하세요</option>
             {devices.map((item, deviceIndex) => (
@@ -277,18 +277,18 @@ function CameraSlot({
             ))}
           </select>
 
-          <label className="rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
+          <label className="rounded-lg border border-dashed border-slate-700 px-3 py-2 text-sm text-slate-300">
             또는 테스트 영상
             <input
               type="file"
               accept="video/*"
               disabled={isStreaming || isBusy}
               onChange={(event) => setTestVideo(event.target.files?.[0] ?? null)}
-              className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-cyan-500/15 file:px-2 file:py-1 file:text-cyan-300"
+              className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-cyan-500/15 file:px-2 file:py-1.5 file:text-cyan-300"
             />
           </label>
 
-          <label className="flex items-center gap-2 text-xs text-slate-300">
+          <label className="flex min-h-10 items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
               checked={flipHorizontal}
@@ -302,11 +302,11 @@ function CameraSlot({
           <div className="flex flex-wrap gap-2">
             {isStreaming ? (
               <>
-                <button onClick={stopCamera} className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20">중지</button>
-                <button onClick={() => onMonitor(index)} disabled={selectedForMonitoring} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-default disabled:opacity-50">관제 화면에서 보기</button>
+                <button onClick={stopCamera} className="min-h-11 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/20">중지</button>
+                <button onClick={() => onMonitor(index)} disabled={selectedForMonitoring} className="min-h-11 rounded-lg border border-cyan-500/40 px-3 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-default disabled:opacity-50">관제 화면에서 보기</button>
               </>
             ) : (
-              <button onClick={startCamera} disabled={isBusy || (!selectedDeviceId && !testVideo) || (!testVideo && selectedDeviceId === otherSelectedDeviceId)} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+              <button onClick={startCamera} disabled={isBusy || (!selectedDeviceId && !testVideo) || (!testVideo && selectedDeviceId === otherSelectedDeviceId)} className="min-h-11 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
                 {isBusy ? '연결 중...' : testVideo ? '테스트 영상 시작' : '카메라 시작'}
               </button>
             )}
@@ -424,7 +424,7 @@ export default function BrowserCameraController({ site, onCameraChange }) {
   }
 
   return (
-    <section className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+    <section className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-3 sm:p-4">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -437,7 +437,7 @@ export default function BrowserCameraController({ site, onCameraChange }) {
             <p className="mt-1 text-xs text-amber-300">원격 기기 카메라는 HTTPS 주소에서만 사용할 수 있습니다.</p>
           )}
         </div>
-        <button onClick={discoverCameras} disabled={discovering || slotStates.some((item) => item.status === 'requesting' || item.status === 'connecting' || item.status === 'streaming')} className="shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50">
+        <button onClick={discoverCameras} disabled={discovering || slotStates.some((item) => item.status === 'requesting' || item.status === 'connecting' || item.status === 'streaming')} className="min-h-11 shrink-0 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50">
           {discovering ? '검색 중...' : slotStates.some((item) => item.status === 'streaming') ? '중지 후 다시 검색' : devices.length ? '카메라 다시 검색' : '카메라 검색'}
         </button>
       </div>
