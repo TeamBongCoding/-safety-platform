@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
+import RankingDashboard from './RankingDashboard'
 
 const tabs = [
   ['overview', '전체 현황'],
   ['accounts', '계정 관리'],
   ['events', '전체 위험 기록'],
+  ['rankings', '오늘 안전 순위'],
   ['audit', '감사 로그'],
 ]
 
@@ -12,6 +14,8 @@ const actionLabels = {
   account_suspended: '계정 정지',
   account_activated: '계정 복구',
   account_deleted: '계정 영구 삭제',
+  events_deleted_today: '오늘 이벤트 전체 삭제',
+  events_deleted_all: '모든 이벤트 전체 삭제',
 }
 
 export default function AdminDashboard({ session, setSession }) {
@@ -24,7 +28,9 @@ export default function AdminDashboard({ session, setSession }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
+  const [deletingEventScope, setDeletingEventScope] = useState('')
 
   const handleError = useCallback((requestError) => {
     if (requestError.status === 401) setSession(null)
@@ -67,6 +73,7 @@ export default function AdminDashboard({ session, setSession }) {
   const selectTab = async (nextTab) => {
     setTab(nextTab)
     setError('')
+    setNotice('')
     try {
       if (nextTab === 'events') setEvents(await api('/api/admin/events?limit=200'))
       if (nextTab === 'audit') setAuditLogs(await api('/api/admin/audit-logs?limit=200'))
@@ -115,6 +122,27 @@ export default function AdminDashboard({ session, setSession }) {
     }
   }
 
+  const deleteEvents = async (scope) => {
+    const message = scope === 'today'
+      ? '오늘 발생한 모든 계정의 이벤트 기록을 삭제할까요? 삭제한 기록은 복구할 수 없습니다.'
+      : '모든 계정의 전체 이벤트 기록을 영구 삭제할까요? 이 작업은 복구할 수 없습니다.'
+    if (!window.confirm(message)) return
+
+    setError('')
+    setNotice('')
+    setDeletingEventScope(scope)
+    try {
+      const result = await api(`/api/admin/events?scope=${scope}`, { method: 'DELETE' })
+      setEvents(await api('/api/admin/events?limit=200'))
+      await loadOverview()
+      setNotice(`${result.deleted_count}건의 이벤트 기록을 삭제했습니다.`)
+    } catch (requestError) {
+      handleError(requestError)
+    } finally {
+      setDeletingEventScope('')
+    }
+  }
+
   const logout = async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' })
@@ -157,6 +185,7 @@ export default function AdminDashboard({ session, setSession }) {
         </nav>
 
         {error && <div role="alert" className="mb-5 flex items-center justify-between rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"><span>{error}</span><button onClick={() => setError('')}>닫기</button></div>}
+        {notice && <div role="status" className="mb-5 flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300"><span>{notice}</span><button onClick={() => setNotice('')}>닫기</button></div>}
 
         {loading ? <AdminLoading /> : (
           <>
@@ -171,7 +200,15 @@ export default function AdminDashboard({ session, setSession }) {
                 onOpenUser={openUser}
               />
             )}
-            {tab === 'events' && <AllEvents events={events} />}
+            {tab === 'events' && (
+              <AllEvents
+                events={events}
+                deletingScope={deletingEventScope}
+                onDeleteToday={() => deleteEvents('today')}
+                onDeleteAll={() => deleteEvents('all')}
+              />
+            )}
+            {tab === 'rankings' && <RankingDashboard />}
             {tab === 'audit' && <AuditLogs logs={auditLogs} />}
           </>
         )}
@@ -355,10 +392,23 @@ function UserDetail({ user, currentAdminId, onClose, onChangeStatus, onDelete })
   )
 }
 
-function AllEvents({ events }) {
+function AllEvents({ events, deletingScope, onDeleteToday, onDeleteAll }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
-      <SectionHeader title="전체 위험 기록" description="모든 계정과 현장에서 발생한 최근 위험 기록입니다." />
+      <div className="flex flex-col gap-4 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-semibold text-white">전체 위험 기록</h2>
+          <p className="mt-1 text-xs text-slate-500">모든 계정과 현장에서 발생한 최근 위험 기록입니다.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={onDeleteToday} disabled={Boolean(deletingScope)} className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-50">
+            {deletingScope === 'today' ? '삭제 중...' : '오늘 이벤트 삭제'}
+          </button>
+          <button onClick={onDeleteAll} disabled={Boolean(deletingScope)} className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-50">
+            {deletingScope === 'all' ? '삭제 중...' : '전체 이벤트 삭제'}
+          </button>
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[850px] text-left text-sm">
           <thead className="bg-slate-950/50 text-xs text-slate-500"><tr><th className="px-5 py-3">발생 시각</th><th className="px-5 py-3">회사</th><th className="px-5 py-3">현장</th><th className="px-5 py-3">유형</th><th className="px-5 py-3">신뢰도</th><th className="px-5 py-3">상태</th></tr></thead>

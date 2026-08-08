@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import AdminDashboard from './AdminDashboard'
 import BrowserCameraController from './BrowserCameraController'
+import RankingDashboard from './RankingDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
 
@@ -35,7 +36,24 @@ export default function App() {
   if (session.user.role === 'platform_admin') {
     return <AdminDashboard session={session} setSession={setSession} />
   }
-  return <Dashboard session={session} setSession={setSession} />
+  return <UserExperience session={session} setSession={setSession} />
+}
+
+function UserExperience({ session, setSession }) {
+  const [screen, setScreen] = useState('dashboard')
+  if (screen === 'ranking') {
+    return (
+      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1400px]">
+          <RankingDashboard
+            currentCompany={session.user.company_name}
+            onBack={() => setScreen('dashboard')}
+          />
+        </div>
+      </main>
+    )
+  }
+  return <Dashboard session={session} setSession={setSession} onShowRanking={() => setScreen('ranking')} />
 }
 
 function AuthScreen({ onAuthenticated, initialError }) {
@@ -113,7 +131,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
   )
 }
 
-function Dashboard({ session, setSession }) {
+function Dashboard({ session, setSession, onShowRanking }) {
   const currentSite = session.current_site
   const [connected, setConnected] = useState(false)
   const [summary, setSummary] = useState(null)
@@ -123,6 +141,7 @@ function Dashboard({ session, setSession }) {
   const [addingSite, setAddingSite] = useState(false)
   const [notice, setNotice] = useState('')
   const [activeCameraId, setActiveCameraId] = useState(null)
+  const [activeInput, setActiveInput] = useState({ kind: 'recorded', name: '기본 녹화 영상' })
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
@@ -181,6 +200,7 @@ function Dashboard({ session, setSession }) {
       setEvents([])
       setStreamReady(false)
       setActiveCameraId(null)
+      setActiveInput({ kind: 'recorded', name: '기본 녹화 영상' })
       setSession(nextSession)
       setNotice('')
     } catch (error) {
@@ -200,6 +220,7 @@ function Dashboard({ session, setSession }) {
       setEvents([])
       setStreamReady(false)
       setActiveCameraId(null)
+      setActiveInput({ kind: 'recorded', name: '기본 녹화 영상' })
       setSession(nextSession)
       setNewSiteName('')
       setAddingSite(false)
@@ -232,9 +253,14 @@ function Dashboard({ session, setSession }) {
     if (summary?.analysis_stage === 'waiting_camera' || summary?.analysis_stage === 'waiting_frame') return '카메라 연결 대기'
     if (summary?.analysis_stage === 'camera_disconnected') return '카메라 연결 종료'
     if (summary?.analysis_stage === 'error') return '분석 오류'
-    if (summary?.analysis_running) return '실시간 분석 중'
+    if (summary?.analysis_running) return activeInput.kind === 'recorded' ? '녹화 영상 분석 중' : '실시간 분석 중'
     return '분석 중지됨'
-  }, [connected, summary])
+  }, [activeInput.kind, connected, summary])
+
+  const isRecordedVideo = activeInput.kind === 'recorded'
+  const videoSourceLabel = isRecordedVideo
+    ? activeCameraId ? `테스트 녹화 영상 · ${activeInput.name}` : '서버 기본 녹화 영상'
+    : `클라이언트 라이브 카메라 · ${activeInput.name}`
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -258,6 +284,7 @@ function Dashboard({ session, setSession }) {
                 {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
               </select>
               <button onClick={() => setAddingSite((value) => !value)} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
+              <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
               <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
             </div>
           </div>
@@ -294,12 +321,27 @@ function Dashboard({ session, setSession }) {
         <BrowserCameraController
           key={currentSite?.id}
           site={currentSite}
-          onCameraChange={(cameraId) => {
+          onCameraChange={(cameraId, input) => {
             setActiveCameraId(cameraId)
+            setActiveInput(input ?? { kind: 'recorded', name: '기본 녹화 영상' })
             setSummary(null)
             setStreamReady(false)
           }}
         />
+
+        {isRecordedVideo && (
+          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-200">녹화 영상 분석 모드</p>
+              <p className="mt-1 text-xs text-amber-100/70">
+                {activeCameraId
+                  ? '실시간 카메라 대신 선택한 테스트 녹화 영상을 분석하고 있습니다.'
+                  : '현재 관제 카메라가 설정되지 않아 서버에 준비된 녹화 영상을 분석하고 있습니다.'}
+              </p>
+            </div>
+            <span className="w-fit rounded-md bg-amber-400 px-2.5 py-1 text-xs font-black tracking-wider text-slate-950">RECORDED VIDEO</span>
+          </div>
+        )}
 
         <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MetricCard label="현재 작업 인원" value={summary?.worker_count} unit="명" tone="cyan" />
@@ -313,9 +355,9 @@ function Dashboard({ session, setSession }) {
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
               <div>
                 <h2 className="font-semibold text-white">현장 분석 영상</h2>
-                <p className="text-xs text-slate-500">{currentSite?.name} · {activeCameraId ? '클라이언트 라이브 카메라' : '기본 분석 영상'} · 사람 추적 · Re-ID · 안전모 · 위험구역 판정</p>
+                <p className="text-xs text-slate-500">{currentSite?.name} · {videoSourceLabel} · 사람 추적 · Re-ID · 안전모 · 위험구역 판정</p>
               </div>
-              <span className="rounded-md bg-red-500/15 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">LIVE</span>
+              <span className={`rounded-md px-2.5 py-1 text-xs font-bold tracking-wider ${isRecordedVideo ? 'bg-amber-500/15 text-amber-300' : 'bg-red-500/15 text-red-300'}`}>{isRecordedVideo ? 'RECORDED' : 'LIVE'}</span>
             </div>
             <ZoneEditor
               key={`${currentSite?.id}-${activeCameraId ?? 'default'}`}
@@ -323,7 +365,7 @@ function Dashboard({ session, setSession }) {
               cameraId={activeCameraId}
               streamKey={`${currentSite?.id}-${activeCameraId ?? 'default'}`}
               streamSrc={`${API_BASE}/api/analysis/stream${activeCameraId ? `?camera_id=${activeCameraId}` : ''}`}
-              streamAlt={`${currentSite?.name} AI 실시간 분석 영상`}
+              streamAlt={`${currentSite?.name} AI ${isRecordedVideo ? '녹화 영상' : '실시간 영상'} 분석`}
               streamReady={streamReady}
               waitingMessage={summary?.analysis_message ?? '영상 스트림을 기다리고 있습니다.'}
               streamError={summary?.last_error}
@@ -334,7 +376,7 @@ function Dashboard({ session, setSession }) {
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
               <span>프레임 #{summary?.frame_index ?? 0}</span>
               <span className={(summary?.entry_roi_count ?? 0) > 0 && (summary?.exit_roi_count ?? 0) > 0 ? '' : 'text-amber-300'}>
-                {activeCameraId ? `카메라 #${activeCameraId}` : '기본 영상'} · {summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · 입구 ROI {summary?.entry_roi_count ?? 0} · 출구 ROI {summary?.exit_roi_count ?? 0}
+                {videoSourceLabel} · {summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · 입구 ROI {summary?.entry_roi_count ?? 0} · 출구 ROI {summary?.exit_roi_count ?? 0}
               </span>
             </div>
           </div>

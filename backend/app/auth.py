@@ -115,6 +115,11 @@ def require_current_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> Site:
+    if user.role == "platform_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="서버 관리자 계정은 영상 분석 및 현장 이벤트 기능을 사용하지 않습니다.",
+        )
     if not user.current_site_id:
         raise HTTPException(status_code=409, detail="관리할 현장을 먼저 선택하세요.")
     site = db.scalar(
