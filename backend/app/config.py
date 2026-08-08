@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -21,7 +22,20 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 ANALYSIS_ENABLED = os.getenv("ANALYSIS_ENABLED", "0") == "1"
 VIDEO_SOURCE = os.getenv("VIDEO_SOURCE")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safety.db")
+if os.getenv("DB_HOST"):
+    _db_password = os.getenv("DB_PASSWORD")
+    if not _db_password:
+        raise ValueError("DB_PASSWORD is required when DB_HOST is configured")
+    DATABASE_URL = URL.create(
+        drivername="postgresql+psycopg",
+        username=os.getenv("DB_USER", "postgres"),
+        password=_db_password,
+        host=os.environ["DB_HOST"],
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "postgres"),
+    )
+else:
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safety.db")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"

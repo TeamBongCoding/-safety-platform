@@ -7,3 +7,4 @@ ultralytics
 shapely
 python-dotenv
 pillow
+psycopg[binary]

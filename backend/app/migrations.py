@@ -3,6 +3,9 @@ from sqlalchemy import inspect
 
 def migrate_legacy_schema(engine) -> None:
     """create_all이 추가하지 못하는 기존 SQLite 컬럼을 안전하게 보강한다."""
+    if engine.dialect.name != "sqlite":
+        return
+
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 
