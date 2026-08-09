@@ -469,9 +469,17 @@ class AnalysisRegistry:
             service.start(source)
         return service
 
+    def stop_camera(self, site_id: int, camera_id: int | None):
+        key = (site_id, camera_id)
+        with self._lock:
+            service = self._services.pop(key, None)
+        if service:
+            service.stop()
+
     def stop_all(self):
         with self._lock:
             services = list(self._services.values())
+            self._services.clear()
         for service in services:
             service.stop()
 

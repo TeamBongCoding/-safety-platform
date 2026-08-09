@@ -1,7 +1,7 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -64,3 +64,23 @@ async def analysis_stream(
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
+
+
+@router.get("/frame")
+async def analysis_frame(
+    camera_id: int | None = None,
+    site: Site = Depends(require_current_site),
+    db: Session = Depends(get_db),
+):
+    """단일 JPEG 프레임을 반환합니다. JupyterHub 등 MJPEG를 지원하지 않는 환경에서 폴링용으로 사용합니다."""
+    analysis_service = service_for_camera(camera_id, site, db)
+    for _ in range(50):  # 최대 1.5초 대기
+        jpeg, _ = analysis_service.get_frame()
+        if jpeg is not None:
+            return Response(
+                content=jpeg,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store"},
+            )
+        await asyncio.sleep(0.03)
+    raise HTTPException(status_code=503, detail="분석 프레임을 아직 사용할 수 없습니다.")

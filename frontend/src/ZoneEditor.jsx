@@ -121,6 +121,51 @@ export default function ZoneEditor({
     }
   }, [updateDisplayRect])
 
+  // MJPEG는 JupyterHub 프록시를 통과하지 못하므로 단일 JPEG 폴링으로 영상을 표시한다.
+  useEffect(() => {
+    if (!streamSrc) return undefined
+    const frameUrl = streamSrc.replace('/stream', '/frame')
+    if (frameUrl === streamSrc) return undefined  // /stream이 없으면 폴링 불필요
+
+    let active = true
+    let gotFirstFrame = false
+    let prevBlob = ''
+    const revoke = (u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) }
+
+    const poll = async () => {
+      if (!active) return
+      try {
+        const resp = await fetch(frameUrl, { credentials: 'include' })
+        if (!active) return
+        if (resp.ok) {
+          const blob = await resp.blob()
+          if (!active) return
+          const url = URL.createObjectURL(blob)
+          if (imageRef.current) imageRef.current.src = url
+          if (!gotFirstFrame) {
+            gotFirstFrame = true
+            updateDisplayRect()
+            onStreamLoad?.()
+          }
+          const old = prevBlob
+          prevBlob = url
+          setTimeout(() => revoke(old), 500)
+        } else if (resp.status === 401 || resp.status === 403) {
+          active = false
+          onStreamError?.()
+          return
+        }
+      } catch {}
+      if (active) setTimeout(poll, 100)
+    }
+
+    poll()
+    return () => {
+      active = false
+      setTimeout(() => revoke(prevBlob), 500)
+    }
+  }, [streamSrc, onStreamError, onStreamLoad, updateDisplayRect])
+
   const handleImageLoad = () => {
     updateDisplayRect()
     onStreamLoad()
@@ -362,7 +407,6 @@ export default function ZoneEditor({
           ref={imageRef}
           key={streamKey}
           className="h-full w-full object-contain"
-          src={streamSrc}
           alt={streamAlt}
           onLoad={handleImageLoad}
           onError={onStreamError}

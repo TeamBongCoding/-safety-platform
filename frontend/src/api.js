@@ -13,9 +13,25 @@ export const API_BASE = withoutTrailingSlash(
 )
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-const websocketBase = new URL(`${API_BASE || ''}/ws`, window.location.origin)
-websocketBase.protocol = `${wsProtocol}:`
-export const WS_URL = import.meta.env.VITE_WS_BASE || withoutTrailingSlash(websocketBase.toString())
+
+// In JupyterHub, bypass Vite's WS proxy by pointing WebSocket directly at
+// the backend port — JupyterHub proxies that port independently and more reliably.
+function detectJupyterWsBase(pathname, protocol, origin) {
+  const match = pathname.match(/^(.*\/proxy\/(?:absolute\/)?)(\d+)(\/|$)/)
+  if (!match) return null
+  const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000'
+  const u = new URL(`${match[1]}${backendPort}/ws`, origin)
+  u.protocol = `${protocol}:`
+  return withoutTrailingSlash(u.toString())
+}
+
+export const WS_URL = import.meta.env.VITE_WS_BASE ||
+  detectJupyterWsBase(window.location.pathname, wsProtocol, window.location.origin) ||
+  withoutTrailingSlash((() => {
+    const u = new URL(`${API_BASE || ''}/ws`, window.location.origin)
+    u.protocol = `${wsProtocol}:`
+    return u.toString()
+  })())
 
 export function cameraUploadUrl(cameraId) {
   const wsOrigin = WS_URL.replace(/\/ws\/?$/, '')

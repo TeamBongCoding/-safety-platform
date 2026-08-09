@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,6 +6,7 @@ from ..auth import require_current_site
 from ..database import get_db
 from ..models import Camera, Site, Worker
 from ..schemas import CameraCreate, CameraOut, WorkerCreate, WorkerOut
+from ..services.analysis_service import analysis_registry
 
 router = APIRouter(prefix="/api", tags=["resources"])
 
@@ -43,4 +44,25 @@ def create_camera(
     db.add(camera)
     db.commit()
     db.refresh(camera)
+    return camera
+
+
+@router.put("/cameras/{camera_id}", response_model=CameraOut)
+def update_camera(
+    camera_id: int,
+    payload: CameraCreate,
+    site: Site = Depends(require_current_site),
+    db: Session = Depends(get_db),
+):
+    camera = db.scalar(
+        select(Camera).where(Camera.id == camera_id, Camera.site_id == site.id)
+    )
+    if not camera:
+        raise HTTPException(status_code=404, detail="카메라를 찾을 수 없습니다.")
+    camera.name = payload.name
+    camera.source = payload.source
+    db.commit()
+    db.refresh(camera)
+    # 기존 분석 서비스를 중단시켜 다음 스트림 요청 시 새 source로 재시작되게 한다
+    analysis_registry.stop_camera(site.id, camera.id)
     return camera

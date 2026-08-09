@@ -87,6 +87,34 @@ find_python() {
 load_env_file
 find_python
 
+# 이전 실행에서 남은 프로세스 정리 (lsof가 없거나 동작 안 할 때를 위해 /proc/net/tcp로 직접 탐색)
+kill_port() {
+  local port="$1"
+  "$PYTHON_BIN" - "$port" <<'PYEOF' 2>/dev/null || true
+import sys, os, glob
+port = int(sys.argv[1])
+try:
+    with open('/proc/net/tcp') as f:
+        for line in f.readlines()[1:]:
+            parts = line.split()
+            if int(parts[1].split(':')[1], 16) == port:
+                inode = parts[9]
+                for pid_dir in glob.glob('/proc/[0-9]*/fd'):
+                    pid = pid_dir.split('/')[2]
+                    try:
+                        for fd in os.listdir(pid_dir):
+                            if f'socket:[{inode}]' in os.readlink(f'{pid_dir}/{fd}'):
+                                os.kill(int(pid), 15)
+                    except: pass
+except: pass
+PYEOF
+}
+
+for port in 8000 5173 3000; do
+  kill_port "$port"
+done
+sleep 0.5
+
 command -v npm >/dev/null 2>&1 || {
   echo "npm을 찾을 수 없습니다. Node.js와 npm을 설치하세요." >&2
   exit 1
@@ -159,7 +187,7 @@ trap cleanup EXIT INT TERM
 start_component \
   "Backend" \
   "$BACKEND_DIR" \
-  "$PYTHON_BIN" -m uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload
+  "$PYTHON_BIN" -m uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
 BACKEND_PID="$LAST_PID"
 
 echo "[Backend] 준비 상태 확인 중..."
@@ -191,11 +219,25 @@ start_component \
   npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
 
 echo
-echo "실행 완료"
-echo "Frontend : http://localhost:$FRONTEND_PORT"
-echo "Backend  : http://${BACKEND_HEALTH_HOST}:$BACKEND_PORT"
-echo "API Docs : http://${BACKEND_HEALTH_HOST}:$BACKEND_PORT/docs"
-echo
-echo "종료하려면 Ctrl+C를 누르세요. 구성 요소 하나가 종료되어도 전체를 정리합니다."
+echo "======================================"
+echo " 실행 완료"
+echo "======================================"
+
+SERVICE_PREFIX="${JUPYTERHUB_SERVICE_PREFIX:-}"
+HUB="${HUB_PUBLIC_URL:-}"
+
+if [[ -n "$SERVICE_PREFIX" && -n "$HUB" ]]; then
+  echo " 개발서버(HMR) : ${HUB}${SERVICE_PREFIX}proxy/${FRONTEND_PORT}/"
+  echo " 빌드버전      : ${HUB}${SERVICE_PREFIX}proxy/${BACKEND_PORT}/"
+  echo " API 문서      : ${HUB}${SERVICE_PREFIX}proxy/${BACKEND_PORT}/docs"
+else
+  echo " 개발서버(HMR) : http://localhost:${FRONTEND_PORT}/"
+  echo " 빌드버전      : http://localhost:${BACKEND_PORT}/"
+  echo " API 문서      : http://localhost:${BACKEND_PORT}/docs"
+fi
+
+echo "======================================"
+echo " 종료: Ctrl+C"
+echo "======================================"
 
 wait -n "${PIDS[@]}"
