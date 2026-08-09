@@ -18,4 +18,8 @@ backend/output*.mp4
 # 환경변수 (텔레그램 토큰 등)
 .env
 
+# JupyterHub deployment runtime
+.run/
+.tools/
+
 .DS_Store

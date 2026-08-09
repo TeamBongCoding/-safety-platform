@@ -38,16 +38,12 @@ cd ..
 
 Linux/macOS에서는 `./start.sh` 또는 `./start.sh --with-analyzer`를 사용합니다. 프론트엔드는 기본적으로 `http://localhost:5173`, API 문서는 `http://localhost:8000/docs`에서 열립니다.
 
-학교 Linux JupyterHub에서는 터미널에서 다음처럼 준비할 수 있습니다.
+학교 Linux JupyterHub 팀 컨테이너가 유일한 배포 환경입니다. 최초 설치와 외부 HTTPS 공개는
+[JupyterHub 배포 가이드](docs/deployment-jupyterhub.md)를 따르세요.
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m scripts.download_fastreid_weights
-cd ..
-./start.sh
+bash deploy/jupyterhub/install.sh
+bash deploy/jupyterhub/service.sh start
 ```
 
 `REID_DEVICE=auto`는 CUDA가 있으면 GPU를 사용하고, 없으면 CPU를 사용합니다.
