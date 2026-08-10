@@ -207,7 +207,11 @@ class GlobalIdentityManager:
             if reid_score < REID_MIN_SIMILARITY:
                 continue
             time_score = max(0.0, 1.0 - elapsed / REID_MAX_TRANSITION_SECONDS)
-            direction_score = (candidate.direction_score + entry_direction) / 2.0
+            # 진입 방향을 모를 때(0.5 기본값) 패널티를 주지 않도록 후보 방향만 사용
+            if direction == (0.0, 0.0):
+                direction_score = candidate.direction_score
+            else:
+                direction_score = (candidate.direction_score + entry_direction) / 2.0
             quality_score = min(candidate.quality, quality)
             total = (
                 0.65 * reid_score
@@ -306,7 +310,17 @@ class GlobalIdentityManager:
     ) -> bool:
         exit_zone = _point_in_any(point, exit_zones)
         if exit_zone is None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[Re-ID] cam%s %s 출구존 미검출 (foot=%.3f,%.3f, zones=%d개)",
+                camera_id, global_person_id, point[0], point[1], len(exit_zones),
+            )
             return False
+        import logging
+        logging.getLogger(__name__).info(
+            "[Re-ID] cam%s %s 출구 등록 → 전환대기 추가 (foot=%.3f,%.3f)",
+            camera_id, global_person_id, point[0], point[1],
+        )
         candidate = TransitionCandidate(
             global_person_id=global_person_id,
             source_camera_id=camera_id,
