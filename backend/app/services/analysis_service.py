@@ -1,10 +1,14 @@
 """영상 분석을 FastAPI 프로세스 안에서 실행하고 최신 결과를 공유한다."""
 
 import json
+import logging
 import threading
 import time
+import traceback
 from datetime import date, datetime, time as datetime_time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import cv2
 import numpy as np
@@ -339,6 +343,8 @@ class AnalysisService:
                     next_frame_at = time.monotonic()
 
         except Exception as exc:
+            traceback.print_exc()
+            logger.error("분석 스레드 오류: %s", exc)
             self._set_status(
                 running=False,
                 stage="error",
@@ -428,6 +434,8 @@ class AnalysisService:
                 frame_index += 1
 
         except Exception as exc:
+            traceback.print_exc()
+            logger.error("외부 카메라 분석 스레드 오류: %s", exc)
             self._set_status(
                 running=False,
                 stage="error",

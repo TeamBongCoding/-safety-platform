@@ -1,12 +1,35 @@
 """바운딩박스 + 한글 상태 라벨 오버레이."""
+import logging
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from ..config import FONT_PATH
 
+logger = logging.getLogger(__name__)
 
-FONT = ImageFont.truetype(FONT_PATH, 18)
+_FONT_CANDIDATES = [
+    FONT_PATH,
+    "C:/Windows/Fonts/malgun.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/nanum/NanumGothic.ttf",
+]
+
+
+def _load_font(size: int = 18):
+    for path in _FONT_CANDIDATES:
+        try:
+            font = ImageFont.truetype(path, size)
+            logger.info("폰트 로드 성공: %s", path)
+            return font
+        except (OSError, IOError):
+            continue
+    logger.warning("한글 폰트를 찾지 못했습니다. PIL 기본 폰트로 대체합니다.")
+    return ImageFont.load_default()
+
+
+FONT = _load_font()
 LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 255)}
 
 
