@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from ..config import ANALYSIS_ENABLED, PROJECT_ROOT, VIDEO_SOURCE
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
-from .person_tracking import CameraPersonTracker, GlobalIdentityManager
+from .person_tracking import CameraPersonTracker, GlobalIdentityManager, HeatExposureTracker
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
 INFER_EVERY = 3
@@ -33,10 +33,16 @@ class AnalysisService:
         identity_manager: GlobalIdentityManager,
         camera_id: int | None = None,
         external: bool = False,
+        is_outdoor: bool = False,
+        heat_service=None,
+        heat_exposure_tracker: HeatExposureTracker | None = None,
     ):
         self.site_id = site_id
         self.camera_id = camera_id
         self.external = external
+        self.is_outdoor = is_outdoor
+        self._heat_service = heat_service
+        self._heat_exposure_tracker = heat_exposure_tracker
         self.identity_manager = identity_manager
         self.person_tracker = CameraPersonTracker(camera_id, identity_manager)
         self._lock = threading.Lock()
@@ -298,6 +304,11 @@ class AnalysisService:
                     detections = detector.detect(frame)
 
                 height, width = frame.shape[:2]
+                heat_status = (
+                    self._heat_service.get_status()
+                    if self._heat_service is not None
+                    else None
+                )
                 rendered, events, frame_status = process_frame(
                     frame,
                     detections,
@@ -307,6 +318,9 @@ class AnalysisService:
                     self.person_tracker,
                     self.identity_manager,
                     include_status=True,
+                    is_outdoor=self.is_outdoor,
+                    heat_status=heat_status,
+                    heat_exposure_tracker=self._heat_exposure_tracker,
                 )
 
                 encoded, jpeg = cv2.imencode(
@@ -394,6 +408,11 @@ class AnalysisService:
                 if frame_index % INFER_EVERY == 0:
                     detections = detector.detect(frame)
                 height, width = frame.shape[:2]
+                heat_status = (
+                    self._heat_service.get_status()
+                    if self._heat_service is not None
+                    else None
+                )
                 rendered, events, frame_status = process_frame(
                     frame,
                     detections,
@@ -403,6 +422,9 @@ class AnalysisService:
                     self.person_tracker,
                     self.identity_manager,
                     include_status=True,
+                    is_outdoor=self.is_outdoor,
+                    heat_status=heat_status,
+                    heat_exposure_tracker=self._heat_exposure_tracker,
                 )
 
                 encoded, output_jpeg = cv2.imencode(
@@ -449,12 +471,15 @@ class AnalysisRegistry:
         self._lock = threading.Lock()
         self._services: dict[tuple[int, int | None], AnalysisService] = {}
         self._identity_managers: dict[int, GlobalIdentityManager] = {}
+        self._heat_exposure_trackers: dict[int, HeatExposureTracker] = {}
 
     def get(
         self,
         site_id: int,
         camera_id: int | None = None,
         source: str | None = None,
+        is_outdoor: bool = False,
+        heat_service=None,
     ) -> AnalysisService:
         key = (site_id, camera_id)
         external = source == "browser"
@@ -464,13 +489,21 @@ class AnalysisRegistry:
                 identity_manager = self._identity_managers.setdefault(
                     site_id, GlobalIdentityManager()
                 )
+                heat_exposure_tracker = self._heat_exposure_trackers.setdefault(
+                    site_id, HeatExposureTracker()
+                )
                 service = AnalysisService(
                     site_id,
                     identity_manager,
                     camera_id=camera_id,
                     external=external,
+                    is_outdoor=is_outdoor,
+                    heat_service=heat_service,
+                    heat_exposure_tracker=heat_exposure_tracker,
                 )
                 self._services[key] = service
+            elif heat_service is not None and service._heat_service is None:
+                service._heat_service = heat_service
         if external:
             service.start_external()
         elif ANALYSIS_ENABLED:

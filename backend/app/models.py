@@ -26,6 +26,8 @@ class Site(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
@@ -65,6 +67,7 @@ class Camera(Base):
     name: Mapped[str] = mapped_column(String(100))
     source: Mapped[str | None] = mapped_column(String(500), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_outdoor: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class Zone(Base):
     __tablename__ = "zones"

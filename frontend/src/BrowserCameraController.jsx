@@ -31,6 +31,7 @@ function CameraSlot({
   const [uploadFps, setUploadFps] = useState(0)
   const [testVideo, setTestVideo] = useState(null)
   const [flipHorizontal, setFlipHorizontal] = useState(true)
+  const [isOutdoor, setIsOutdoor] = useState(false)
 
   const device = devices.find((item) => item.deviceId === selectedDeviceId)
   const deviceName = testVideo?.name || device?.label || `카메라 ${index + 1}`
@@ -89,13 +90,18 @@ function CameraSlot({
     if (!camera) {
       camera = await api('/api/cameras', {
         method: 'POST',
-        body: JSON.stringify({ name: testVideo ? `테스트 영상 ${index + 1}` : deviceName, source: 'browser' }),
+        body: JSON.stringify({ name: testVideo ? `테스트 영상 ${index + 1}` : deviceName, source: 'browser', is_outdoor: isOutdoor }),
       })
       try {
         window.localStorage.setItem(storageKey, String(camera.id))
       } catch {
         // 카메라 ID 저장은 편의 기능이므로 전송 실패로 처리하지 않는다.
       }
+    } else if (camera.is_outdoor !== isOutdoor) {
+      camera = await api(`/api/cameras/${camera.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: camera.name, source: 'browser', is_outdoor: isOutdoor }),
+      })
     }
     return camera
   }
@@ -297,6 +303,17 @@ function CameraSlot({
               className="h-4 w-4 accent-cyan-500"
             />
             좌우 반전 보정
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={isOutdoor}
+              disabled={isStreaming || isBusy}
+              onChange={(event) => setIsOutdoor(event.target.checked)}
+              className="h-4 w-4 accent-orange-500"
+            />
+            야외 카메라 (폭염 분석)
           </label>
 
           <div className="flex flex-wrap gap-2">

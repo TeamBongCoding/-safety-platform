@@ -1,8 +1,12 @@
 """Detection, tracking, cross-camera Re-ID, zones and helmet status pipeline."""
 
+import logging
+from .brightness import estimate_sun_shade, frame_avg_brightness
 from .helmet_logic import match_helmet_to_person
 from .overlay import draw_status
 from .safety_rules import ZONE_TYPES, evaluate, locate
+
+_log = logging.getLogger(__name__)
 
 
 def process_frame(
@@ -14,12 +18,25 @@ def process_frame(
     tracker,
     identity_manager,
     include_status=False,
+    is_outdoor=False,
+    heat_status=None,
+    heat_exposure_tracker=None,
 ):
     persons = [d for d in detections if d["cls"] == "person"]
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
     entry_zones = [zone for zone in zones if zone["zone_type"] == "camera_entry"]
     exit_zones = [zone for zone in zones if zone["zone_type"] == "camera_exit"]
     tracks = tracker.update(frame, persons, w, h, entry_zones, exit_zones)
+
+    # 야외 카메라이고 체감온도가 기준 이상일 때만 밝기 분석 수행
+    heat_level = heat_status.level if heat_status is not None else "inactive"
+    sun_threshold = heat_status.sun_threshold if heat_status is not None else 1.15
+    shade_threshold = heat_status.shade_threshold if heat_status is not None else 0.85
+    do_shade = heat_level != "inactive"
+    frame_avg = frame_avg_brightness(frame) if do_shade else None
+
+    import time as _time
+    _now = _time.monotonic()
 
     events = []
     workers = []
@@ -29,6 +46,21 @@ def process_frame(
         helmet_on = match_helmet_to_person(track.box, helmets)
         level, reasons = evaluate(zone_status, zone, helmet_on)
         zone_label = ZONE_TYPES[zone["zone_type"]]["label"] if zone else None
+
+        if do_shade and frame_avg is not None:
+            instant = estimate_sun_shade(
+                frame, track.box, frame_avg, sun_threshold, shade_threshold
+            )
+            track.update_shade(instant)
+        shade = track.shade_status if do_shade else "unknown"
+        rest_needed = do_shade and (heat_level == "severe" or shade == "sun")
+
+        heat_seconds = 0.0
+        if heat_exposure_tracker is not None and heat_level != "inactive":
+            heat_seconds = heat_exposure_tracker.update(
+                track.global_person_id, in_heat=rest_needed, now=_now
+            )
+
         frame = draw_status(
             frame,
             track.box,
@@ -37,6 +69,8 @@ def process_frame(
             level,
             track.global_person_id,
             track.local_track_id,
+            in_heat_zone=rest_needed,
+            heat_seconds=heat_seconds,
         )
 
         worker = {
@@ -54,6 +88,8 @@ def process_frame(
             "reid_pending": bool(
                 track.match_details is None and track.entry_grace_remaining > 0
             ),
+            "shade_status": shade,
+            "rest_needed": rest_needed,
         }
         workers.append(worker)
 

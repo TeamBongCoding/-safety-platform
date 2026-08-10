@@ -131,6 +131,13 @@ function AuthScreen({ onAuthenticated, initialError }) {
   )
 }
 
+const heatLevelMeta = {
+  inactive: null,
+  caution: { label: '폭염 주의', color: 'amber', bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-300', badge: 'bg-amber-500/20 text-amber-200' },
+  warning: { label: '폭염 경보', color: 'orange', bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-300', badge: 'bg-orange-500/20 text-orange-200' },
+  severe: { label: '폭염 심각', color: 'red', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', badge: 'bg-red-500/20 text-red-200' },
+}
+
 function Dashboard({ session, setSession, onShowRanking }) {
   const currentSite = session.current_site
   const [connected, setConnected] = useState(false)
@@ -138,15 +145,33 @@ function Dashboard({ session, setSession, onShowRanking }) {
   const [events, setEvents] = useState([])
   const [streamReady, setStreamReady] = useState(false)
   const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteLat, setNewSiteLat] = useState('')
+  const [newSiteLon, setNewSiteLon] = useState('')
   const [addingSite, setAddingSite] = useState(false)
   const [notice, setNotice] = useState('')
   const [activeCameraId, setActiveCameraId] = useState(null)
   const [activeInput, setActiveInput] = useState({ kind: 'recorded', name: '기본 녹화 영상' })
+  const [heatStatus, setHeatStatus] = useState(null)
+  const [demoTemp, setDemoTemp] = useState('')
+  const [showDemoControls, setShowDemoControls] = useState(false)
+  const [sunThreshold, setSunThreshold] = useState(1.15)
+  const [shadeThreshold, setShadeThreshold] = useState(0.85)
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
     else setNotice(error.message)
   }, [setSession])
+
+  // 체감온도 상태 30초 폴링
+  useEffect(() => {
+    if (!currentSite) return undefined
+    const fetchHeat = () => {
+      api('/api/heat/status').then(setHeatStatus).catch(() => {})
+    }
+    fetchHeat()
+    const timer = window.setInterval(fetchHeat, 30_000)
+    return () => window.clearInterval(timer)
+  }, [currentSite])
 
   const loadEvents = useCallback(async () => {
     if (!currentSite) return
@@ -211,10 +236,17 @@ function Dashboard({ session, setSession, onShowRanking }) {
   const createSite = async (event) => {
     event.preventDefault()
     if (!newSiteName.trim()) return
+    const body = { name: newSiteName.trim() }
+    const lat = parseFloat(newSiteLat)
+    const lon = parseFloat(newSiteLon)
+    if (!isNaN(lat) && !isNaN(lon)) {
+      body.latitude = lat
+      body.longitude = lon
+    }
     try {
       const nextSession = await api('/api/sites', {
         method: 'POST',
-        body: JSON.stringify({ name: newSiteName.trim() }),
+        body: JSON.stringify(body),
       })
       setSummary(null)
       setEvents([])
@@ -223,8 +255,32 @@ function Dashboard({ session, setSession, onShowRanking }) {
       setActiveInput({ kind: 'recorded', name: '기본 녹화 영상' })
       setSession(nextSession)
       setNewSiteName('')
+      setNewSiteLat('')
+      setNewSiteLon('')
       setAddingSite(false)
       setNotice('새 현장을 만들고 현재 현장으로 선택했습니다.')
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
+
+  const applyDemoTemp = async () => {
+    const val = demoTemp.trim() === '' ? null : parseFloat(demoTemp)
+    if (demoTemp.trim() !== '' && isNaN(val)) return
+    try {
+      await api('/api/heat/demo', { method: 'PATCH', body: JSON.stringify({ apparent_temp: val }) })
+      api('/api/heat/status').then(setHeatStatus).catch(() => {})
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
+
+  const applyThresholds = async () => {
+    try {
+      await api('/api/heat/thresholds', {
+        method: 'PATCH',
+        body: JSON.stringify({ sun_threshold: sunThreshold, shade_threshold: shadeThreshold }),
+      })
     } catch (error) {
       handleUnauthorized(error)
     }
@@ -290,7 +346,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
           </div>
 
           {addingSite && (
-            <form onSubmit={createSite} className="mt-4 flex max-w-lg gap-2">
+            <form onSubmit={createSite} className="mt-4 flex max-w-2xl flex-wrap gap-2">
               <input
                 value={newSiteName}
                 onChange={(event) => setNewSiteName(event.target.value)}
@@ -298,6 +354,22 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 maxLength="100"
                 autoFocus
                 className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+              />
+              <input
+                value={newSiteLat}
+                onChange={(event) => setNewSiteLat(event.target.value)}
+                placeholder="위도 (선택)"
+                type="number"
+                step="any"
+                className="w-32 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+              />
+              <input
+                value={newSiteLon}
+                onChange={(event) => setNewSiteLon(event.target.value)}
+                placeholder="경도 (선택)"
+                type="number"
+                step="any"
+                className="w-32 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
               />
               <button className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">추가</button>
             </form>
@@ -349,6 +421,23 @@ function Dashboard({ session, setSession, onShowRanking }) {
           <MetricCard label="카메라 전환 대기" value={summary?.transition_candidate_count} unit="명" tone="amber" />
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
+
+        {heatStatus && (
+          <HeatSection
+            heatStatus={heatStatus}
+            workers={summary?.workers ?? []}
+            demoTemp={demoTemp}
+            setDemoTemp={setDemoTemp}
+            onApplyDemo={applyDemoTemp}
+            sunThreshold={sunThreshold}
+            setSunThreshold={setSunThreshold}
+            shadeThreshold={shadeThreshold}
+            setShadeThreshold={setShadeThreshold}
+            onApplyThresholds={applyThresholds}
+            showDemoControls={showDemoControls}
+            setShowDemoControls={setShowDemoControls}
+          />
+        )}
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20">
@@ -481,7 +570,15 @@ function WorkerCard({ worker }) {
     <article className={`rounded-xl border p-4 ${style}`}>
       <div className="mb-3 flex items-center justify-between">
         <span className="font-semibold text-white">Global ID · {worker.global_person_id ?? worker.id}</span>
-        <span className="text-xs font-bold uppercase tracking-wider">{worker.level}</span>
+        <div className="flex items-center gap-1.5">
+          {worker.shade_status === 'sun' && (
+            <span className="rounded-full bg-orange-500/20 px-2 py-0.5 text-[10px] font-bold text-orange-300">양지</span>
+          )}
+          {worker.shade_status === 'shade' && (
+            <span className="rounded-full bg-slate-600/40 px-2 py-0.5 text-[10px] font-bold text-slate-300">그늘</span>
+          )}
+          <span className="text-xs font-bold uppercase tracking-wider">{worker.level}</span>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
         <StatusPill label="안전모" ok={worker.helmet_on} />
@@ -489,6 +586,11 @@ function WorkerCard({ worker }) {
       </div>
       <p className="mt-3 text-xs text-slate-400">위치 · {worker.zone}</p>
       <p className="mt-1 text-xs text-slate-400">객체 품질 · {Math.round((worker.image_quality ?? 0) * 100)}%</p>
+      {worker.rest_needed && (
+        <p className="mt-2 rounded-md bg-orange-500/15 px-2 py-1.5 text-xs font-semibold text-orange-300">
+          휴식 권고 — 야외 양지, 폭염 위험
+        </p>
+      )}
       {worker.camera_transition && (
         <p className="mt-2 rounded-md bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200">
           카메라 #{worker.camera_transition.matched_from_camera_id}에서 연결 · Re-ID {Math.round(worker.camera_transition.reid_similarity * 100)}% · 종합 {Math.round(worker.camera_transition.match_score * 100)}% · {worker.camera_transition.transition_seconds}초
@@ -499,6 +601,128 @@ function WorkerCard({ worker }) {
       )}
       {worker.reasons?.length > 0 && <p className="mt-1 text-xs font-medium">{worker.reasons.join(' · ')}</p>}
     </article>
+  )
+}
+
+function HeatSection({
+  heatStatus, workers,
+  demoTemp, setDemoTemp, onApplyDemo,
+  sunThreshold, setSunThreshold, shadeThreshold, setShadeThreshold, onApplyThresholds,
+  showDemoControls, setShowDemoControls,
+}) {
+  const meta = heatLevelMeta[heatStatus.level]
+  const restCount = workers.filter((w) => w.rest_needed).length
+  const inactive = !meta
+
+  const borderBg = inactive
+    ? 'border-slate-700 bg-slate-900/60'
+    : `${meta.bg} ${meta.border}`
+
+  return (
+    <div className="mb-5 space-y-3">
+      {heatStatus.level === 'severe' && (
+        <div className="flex items-center gap-3 rounded-xl border border-red-500/50 bg-red-500/10 px-5 py-3 text-red-300">
+          <span className="text-xl">⚠</span>
+          <div>
+            <p className="font-bold">옥외작업 중지 검토 권고</p>
+            <p className="text-xs text-red-300/70">체감온도 38°C 이상 — 옥외 작업자의 안전을 즉시 확인하세요.</p>
+          </div>
+        </div>
+      )}
+
+      <div className={`rounded-xl border px-5 py-4 ${borderBg}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              {inactive
+                ? <span className="text-sm font-bold text-slate-400">폭염 모니터링</span>
+                : <span className={`text-sm font-bold ${meta.text}`}>{meta.label}</span>
+              }
+              {heatStatus.demo_mode && (
+                <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">DEMO</span>
+              )}
+              {heatStatus.stale && (
+                <span className="rounded bg-slate-600/40 px-1.5 py-0.5 text-[10px] text-slate-400">기상 데이터 오래됨</span>
+              )}
+            </div>
+            <p className={`mt-1 text-2xl font-bold tabular-nums ${inactive ? 'text-slate-400' : meta.text}`}>
+              {heatStatus.apparent_temp !== null ? `${heatStatus.apparent_temp}°C` : '--'}
+              <span className="ml-2 text-sm font-normal text-slate-500">체감온도</span>
+            </p>
+            {restCount > 0 && (
+              <p className="mt-1 text-xs text-orange-300">휴식 권고 작업자 {restCount}명 (양지·폭염)</p>
+            )}
+            <p className="mt-1 text-xs text-slate-600">
+              * 본 정보는 위험 추정 보조 자료이며 건강 데이터를 저장하지 않습니다.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-400">
+              체감온도 직접 설정 (°C)
+              <div className="mt-1 flex items-center gap-1.5">
+                <input
+                  type="number"
+                  step="0.1"
+                  value={demoTemp}
+                  onChange={(e) => setDemoTemp(e.target.value)}
+                  placeholder="비워두면 해제"
+                  className="w-32 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500"
+                />
+                <button
+                  onClick={onApplyDemo}
+                  className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-400"
+                >
+                  적용
+                </button>
+              </div>
+            </label>
+
+            <button
+              onClick={() => setShowDemoControls((v) => !v)}
+              className="self-end rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-500 hover:border-slate-500 hover:text-slate-300"
+            >
+              임계값
+            </button>
+          </div>
+        </div>
+
+        {showDemoControls && (
+          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-700/50 pt-4">
+            <label className="block text-xs text-slate-400">
+              양지 임계값
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="2"
+                value={sunThreshold}
+                onChange={(e) => setSunThreshold(Number(e.target.value))}
+                className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-orange-500"
+              />
+            </label>
+            <label className="block text-xs text-slate-400">
+              그늘 임계값
+              <input
+                type="number"
+                step="0.01"
+                min="0.1"
+                max="0.99"
+                value={shadeThreshold}
+                onChange={(e) => setShadeThreshold(Number(e.target.value))}
+                className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-slate-500"
+              />
+            </label>
+            <button
+              onClick={onApplyThresholds}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-orange-500 hover:text-orange-300"
+            >
+              임계값 적용
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

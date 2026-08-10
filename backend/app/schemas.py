@@ -27,11 +27,21 @@ class ProfileUpdate(BaseModel):
 
 class SiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class SitePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class SiteOut(BaseModel):
     id: int
     name: str
+    latitude: float | None = None
+    longitude: float | None = None
 
     class Config:
         from_attributes = True
@@ -77,6 +87,7 @@ class WorkerOut(WorkerCreate):
 class CameraCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     source: str | None = Field(default=None, max_length=500)
+    is_outdoor: bool = False
 
 
 class CameraOut(CameraCreate):

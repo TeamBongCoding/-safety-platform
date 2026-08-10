@@ -19,6 +19,13 @@ def migrate_legacy_schema(engine) -> None:
             ("last_login_at", "ALTER TABLE users ADD COLUMN last_login_at DATETIME"),
             ("suspended_at", "ALTER TABLE users ADD COLUMN suspended_at DATETIME"),
         ],
+        "sites": [
+            ("latitude", "ALTER TABLE sites ADD COLUMN latitude FLOAT"),
+            ("longitude", "ALTER TABLE sites ADD COLUMN longitude FLOAT"),
+        ],
+        "cameras": [
+            ("is_outdoor", "ALTER TABLE cameras ADD COLUMN is_outdoor BOOLEAN NOT NULL DEFAULT 0"),
+        ],
         "zones": [
             ("site_id", "ALTER TABLE zones ADD COLUMN site_id INTEGER REFERENCES sites(id)"),
             ("camera_id", "ALTER TABLE zones ADD COLUMN camera_id INTEGER REFERENCES cameras(id)"),

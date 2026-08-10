@@ -366,6 +366,8 @@ class LocalTrack:
     exit_point: tuple[float, float] | None = None
     exit_direction: tuple[float, float] = (0.0, 0.0)
     exit_candidate_registered: bool = False
+    # (timestamp, 'sun'|'shade'|'unknown') 최근 10초 이력
+    _shade_history: list = field(default_factory=list)
 
     @property
     def point(self) -> tuple[float, float]:
@@ -378,6 +380,69 @@ class LocalTrack:
         start = self.points[max(0, len(self.points) - 6)]
         end = self.points[-1]
         return _unit((end[0] - start[0], end[1] - start[1]))
+
+    @property
+    def shade_status(self) -> str:
+        """최근 5초 다수결로 양지/그늘 판정."""
+        now = time.monotonic()
+        recent = [s for t, s in self._shade_history if now - t <= 5.0]
+        if not recent:
+            return 'unknown'
+        sun = recent.count('sun')
+        shade = recent.count('shade')
+        total = len(recent)
+        if sun > total // 2:
+            return 'sun'
+        if shade > total // 2:
+            return 'shade'
+        return 'unknown'
+
+    def update_shade(self, status: str) -> None:
+        now = time.monotonic()
+        self._shade_history.append((now, status))
+        cutoff = now - 10.0
+        self._shade_history = [(t, s) for t, s in self._shade_history if t >= cutoff]
+
+
+class HeatExposureTracker:
+    """global_person_id별 폭염구역 연속 체류 시간을 추적한다 (크로스카메라)."""
+
+    ABSENCE_RESET_SECONDS = 20.0
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        # global_person_id -> {"last_seen": float, "heat_start": float | None}
+        self._state: dict[str, dict] = {}
+
+    def update(self, global_person_id: str, in_heat: bool, now: float | None = None) -> float:
+        """폭염구역 체류 상태를 갱신하고 연속 체류 초를 반환한다."""
+        if now is None:
+            now = time.monotonic()
+        with self._lock:
+            state = self._state.get(global_person_id)
+            if state is None:
+                state = {"last_seen": now, "heat_start": now if in_heat else None}
+                self._state[global_person_id] = state
+            else:
+                gap = now - state["last_seen"]
+                state["last_seen"] = now
+                if gap >= self.ABSENCE_RESET_SECONDS:
+                    state["heat_start"] = now if in_heat else None
+                elif in_heat:
+                    if state["heat_start"] is None:
+                        state["heat_start"] = now
+                else:
+                    state["heat_start"] = None
+            if in_heat and state["heat_start"] is not None:
+                return now - state["heat_start"]
+            return 0.0
+
+    def purge_stale(self, now: float | None = None):
+        if now is None:
+            now = time.monotonic()
+        with self._lock:
+            cutoff = now - 60.0
+            self._state = {gid: s for gid, s in self._state.items() if s["last_seen"] >= cutoff}
 
 
 class CameraPersonTracker:

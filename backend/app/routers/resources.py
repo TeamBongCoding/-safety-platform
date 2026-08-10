@@ -61,8 +61,9 @@ def update_camera(
         raise HTTPException(status_code=404, detail="카메라를 찾을 수 없습니다.")
     camera.name = payload.name
     camera.source = payload.source
+    camera.is_outdoor = payload.is_outdoor
     db.commit()
     db.refresh(camera)
-    # 기존 분석 서비스를 중단시켜 다음 스트림 요청 시 새 source로 재시작되게 한다
+    # 기존 분석 서비스를 중단시켜 다음 스트림 요청 시 새 설정으로 재시작되게 한다
     analysis_registry.stop_camera(site.id, camera.id)
     return camera

@@ -8,12 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .auth import user_from_token
-from .config import CORS_ORIGINS, PROJECT_ROOT, SESSION_COOKIE_NAME
+from .config import CORS_ORIGINS, KMA_API_KEY, PROJECT_ROOT, SESSION_COOKIE_NAME
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Camera, Site
-from .routers import admin, analysis, auth, events, rankings, resources, sites, zones
+from .routers import admin, analysis, auth, events, heat, rankings, resources, sites, zones
 from .services.analysis_service import analysis_registry
+from .services.heat_service import heat_registry
 
 migrate_legacy_schema(engine)
 Base.metadata.create_all(bind=engine)
@@ -23,6 +24,7 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     yield
     analysis_registry.stop_all()
+    heat_registry.stop_all()
 
 
 app = FastAPI(title="AI 안전관리 플랫폼", lifespan=lifespan)
@@ -43,6 +45,7 @@ app.include_router(events.router)
 app.include_router(rankings.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
+app.include_router(heat.router)
 
 
 @app.get("/health")
@@ -77,7 +80,10 @@ async def ws_endpoint(ws: WebSocket):
             await ws.close(code=4403, reason="현장 접근 권한이 없습니다.")
             return
         site_id = site.id
+        site_lat = site.latitude
+        site_lon = site.longitude
         camera = None
+        camera_is_outdoor = False
         if camera_id is not None:
             camera = db.scalar(
                 select(Camera).where(Camera.id == camera_id, Camera.site_id == site.id)
@@ -85,11 +91,15 @@ async def ws_endpoint(ws: WebSocket):
             if not camera:
                 await ws.close(code=4404, reason="카메라를 찾을 수 없습니다.")
                 return
+            camera_is_outdoor = camera.is_outdoor
 
+    heat_svc = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
     analysis_service = analysis_registry.get(
         site_id,
         camera.id if camera else None,
         camera.source if camera else None,
+        is_outdoor=camera_is_outdoor,
+        heat_service=heat_svc,
     )
     await ws.accept()
     try:
@@ -134,8 +144,12 @@ async def camera_upload_endpoint(ws: WebSocket, camera_id: int):
             await ws.close(code=4404, reason="브라우저 카메라를 찾을 수 없습니다.")
             return
         site_id = site.id
+        site_lat = site.latitude
+        site_lon = site.longitude
+        camera_is_outdoor = camera.is_outdoor
 
-    service = analysis_registry.get(site_id, camera_id, "browser")
+    heat_svc = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
+    service = analysis_registry.get(site_id, camera_id, "browser", is_outdoor=camera_is_outdoor, heat_service=heat_svc)
     if not service.attach_external_camera():
         await ws.close(code=4409, reason="이 카메라는 이미 다른 클라이언트에서 전송 중입니다.")
         return

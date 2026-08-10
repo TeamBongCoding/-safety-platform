@@ -6,9 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import require_current_site
+from ..config import KMA_API_KEY
 from ..database import get_db
 from ..models import Camera, Site
 from ..services.analysis_service import analysis_registry
+from ..services.heat_service import heat_registry
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
@@ -18,14 +20,15 @@ def service_for_camera(
     site: Site,
     db: Session,
 ):
+    heat_svc = heat_registry.get(site.id, site.latitude, site.longitude, KMA_API_KEY)
     if camera_id is None:
-        return analysis_registry.get(site.id)
+        return analysis_registry.get(site.id, heat_service=heat_svc)
     camera = db.scalar(
         select(Camera).where(Camera.id == camera_id, Camera.site_id == site.id)
     )
     if not camera:
         raise HTTPException(status_code=404, detail="카메라를 찾을 수 없습니다.")
-    return analysis_registry.get(site.id, camera.id, camera.source)
+    return analysis_registry.get(site.id, camera.id, camera.source, is_outdoor=camera.is_outdoor, heat_service=heat_svc)
 
 
 @router.get("/status")
