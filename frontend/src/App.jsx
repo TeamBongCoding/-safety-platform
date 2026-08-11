@@ -156,17 +156,27 @@ function Dashboard({ session, setSession, onShowRanking }) {
   const [showDemoControls, setShowDemoControls] = useState(false)
   const [sunThreshold, setSunThreshold] = useState(1.15)
   const [shadeThreshold, setShadeThreshold] = useState(0.85)
+  const [cautionTemp, setCautionTemp] = useState(31.0)
+  const [warningTemp, setWarningTemp] = useState(33.0)
+  const [severeTemp, setSevereTemp] = useState(38.0)
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
     else setNotice(error.message)
   }, [setSession])
 
-  // 체감온도 상태 30초 폴링
+  // 체감온도 상태 30초 폴링 — 서버 임계값으로 로컬 상태 초기화
   useEffect(() => {
     if (!currentSite) return undefined
     const fetchHeat = () => {
-      api('/api/heat/status').then(setHeatStatus).catch(() => {})
+      api('/api/heat/status').then((data) => {
+        setHeatStatus(data)
+        if (data.caution_temp != null) setCautionTemp(data.caution_temp)
+        if (data.warning_temp != null) setWarningTemp(data.warning_temp)
+        if (data.severe_temp != null)  setSevereTemp(data.severe_temp)
+        if (data.sun_threshold != null)   setSunThreshold(data.sun_threshold)
+        if (data.shade_threshold != null) setShadeThreshold(data.shade_threshold)
+      }).catch(() => {})
     }
     fetchHeat()
     const timer = window.setInterval(fetchHeat, 30_000)
@@ -281,6 +291,18 @@ function Dashboard({ session, setSession, onShowRanking }) {
         method: 'PATCH',
         body: JSON.stringify({ sun_threshold: sunThreshold, shade_threshold: shadeThreshold }),
       })
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
+
+  const applyTempThresholds = async () => {
+    try {
+      await api('/api/heat/temp-thresholds', {
+        method: 'PATCH',
+        body: JSON.stringify({ caution_temp: cautionTemp, warning_temp: warningTemp, severe_temp: severeTemp }),
+      })
+      api('/api/heat/status').then(setHeatStatus).catch(() => {})
     } catch (error) {
       handleUnauthorized(error)
     }
@@ -434,6 +456,13 @@ function Dashboard({ session, setSession, onShowRanking }) {
             shadeThreshold={shadeThreshold}
             setShadeThreshold={setShadeThreshold}
             onApplyThresholds={applyThresholds}
+            cautionTemp={cautionTemp}
+            setCautionTemp={setCautionTemp}
+            warningTemp={warningTemp}
+            setWarningTemp={setWarningTemp}
+            severeTemp={severeTemp}
+            setSevereTemp={setSevereTemp}
+            onApplyTempThresholds={applyTempThresholds}
             showDemoControls={showDemoControls}
             setShowDemoControls={setShowDemoControls}
           />
@@ -608,6 +637,7 @@ function HeatSection({
   heatStatus, workers,
   demoTemp, setDemoTemp, onApplyDemo,
   sunThreshold, setSunThreshold, shadeThreshold, setShadeThreshold, onApplyThresholds,
+  cautionTemp, setCautionTemp, warningTemp, setWarningTemp, severeTemp, setSevereTemp, onApplyTempThresholds,
   showDemoControls, setShowDemoControls,
 }) {
   const meta = heatLevelMeta[heatStatus.level]
@@ -625,7 +655,7 @@ function HeatSection({
           <span className="text-xl">⚠</span>
           <div>
             <p className="font-bold">옥외작업 중지 검토 권고</p>
-            <p className="text-xs text-red-300/70">체감온도 38°C 이상 — 옥외 작업자의 안전을 즉시 확인하세요.</p>
+            <p className="text-xs text-red-300/70">체감온도 {heatStatus.severe_temp ?? 38}°C 이상 — 옥외 작업자의 안전을 즉시 확인하세요.</p>
           </div>
         </div>
       )}
@@ -688,37 +718,77 @@ function HeatSection({
         </div>
 
         {showDemoControls && (
-          <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-700/50 pt-4">
-            <label className="block text-xs text-slate-400">
-              양지 임계값
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="2"
-                value={sunThreshold}
-                onChange={(e) => setSunThreshold(Number(e.target.value))}
-                className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-orange-500"
-              />
-            </label>
-            <label className="block text-xs text-slate-400">
-              그늘 임계값
-              <input
-                type="number"
-                step="0.01"
-                min="0.1"
-                max="0.99"
-                value={shadeThreshold}
-                onChange={(e) => setShadeThreshold(Number(e.target.value))}
-                className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-slate-500"
-              />
-            </label>
-            <button
-              onClick={onApplyThresholds}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-orange-500 hover:text-orange-300"
-            >
-              임계값 적용
-            </button>
+          <div className="mt-4 space-y-4 border-t border-slate-700/50 pt-4">
+            {/* 폭염 단계 온도 설정 */}
+            <div>
+              <p className="mb-2 text-xs font-semibold text-slate-400">폭염 단계 온도 (°C)</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="block text-xs text-slate-500">
+                  주의
+                  <input
+                    type="number" step="0.5" min="20" max="50"
+                    value={cautionTemp}
+                    onChange={(e) => setCautionTemp(Number(e.target.value))}
+                    className="mt-1 block w-20 rounded border border-amber-700/50 bg-slate-950 px-2 py-1 text-sm text-amber-200 outline-none focus:border-amber-500"
+                  />
+                </label>
+                <label className="block text-xs text-slate-500">
+                  경보
+                  <input
+                    type="number" step="0.5" min="20" max="50"
+                    value={warningTemp}
+                    onChange={(e) => setWarningTemp(Number(e.target.value))}
+                    className="mt-1 block w-20 rounded border border-orange-700/50 bg-slate-950 px-2 py-1 text-sm text-orange-200 outline-none focus:border-orange-500"
+                  />
+                </label>
+                <label className="block text-xs text-slate-500">
+                  심각 (무조건 폭염)
+                  <input
+                    type="number" step="0.5" min="20" max="50"
+                    value={severeTemp}
+                    onChange={(e) => setSevereTemp(Number(e.target.value))}
+                    className="mt-1 block w-20 rounded border border-red-700/50 bg-slate-950 px-2 py-1 text-sm text-red-200 outline-none focus:border-red-500"
+                  />
+                </label>
+                <button
+                  onClick={onApplyTempThresholds}
+                  className="self-end rounded-lg bg-amber-600/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500"
+                >
+                  온도 적용
+                </button>
+              </div>
+            </div>
+
+            {/* 양지/그늘 감지 임계값 */}
+            <div>
+              <p className="mb-2 text-xs font-semibold text-slate-400">양지·그늘 감지 임계값 (밝기 비율)</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="block text-xs text-slate-500">
+                  양지 기준
+                  <input
+                    type="number" step="0.01" min="0" max="2"
+                    value={sunThreshold}
+                    onChange={(e) => setSunThreshold(Number(e.target.value))}
+                    className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-orange-500"
+                  />
+                </label>
+                <label className="block text-xs text-slate-500">
+                  그늘 기준
+                  <input
+                    type="number" step="0.01" min="0.1" max="0.99"
+                    value={shadeThreshold}
+                    onChange={(e) => setShadeThreshold(Number(e.target.value))}
+                    className="mt-1 block w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white outline-none focus:border-slate-500"
+                  />
+                </label>
+                <button
+                  onClick={onApplyThresholds}
+                  className="self-end rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-orange-500 hover:text-orange-300"
+                >
+                  밝기 적용
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

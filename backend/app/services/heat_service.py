@@ -89,6 +89,9 @@ class HeatStatus:
     demo_mode: bool
     sun_threshold: float
     shade_threshold: float
+    caution_temp: float
+    warning_temp: float
+    severe_temp: float
 
 
 class HeatService:
@@ -108,6 +111,9 @@ class HeatService:
         self._demo_temp: float | None = None
         self._sun_threshold = 1.15
         self._shade_threshold = 0.85
+        self._caution_temp = CAUTION_TEMP
+        self._warning_temp = WARNING_TEMP
+        self._severe_temp = SEVERE_TEMP
 
         if api_key and lat is not None and lon is not None:
             t = threading.Thread(target=self._poll_loop, name="heat-poll", daemon=True)
@@ -177,17 +183,30 @@ class HeatService:
             at, values["TMP"], values["REH"], values.get("WSD", 0.0), nx, ny,
         )
 
+    def _level(self, t: float) -> HeatLevel:
+        if t >= self._severe_temp:
+            return "severe"
+        if t >= self._warning_temp:
+            return "warning"
+        if t >= self._caution_temp:
+            return "caution"
+        return "inactive"
+
     def get_status(self) -> HeatStatus:
         with self._lock:
             sun_t, shade_t = self._sun_threshold, self._shade_threshold
+            c, w, s = self._caution_temp, self._warning_temp, self._severe_temp
             if self._demo_temp is not None:
                 return HeatStatus(
                     apparent_temp=self._demo_temp,
-                    level=_heat_level(self._demo_temp),
+                    level=self._level(self._demo_temp),
                     stale=False,
                     demo_mode=True,
                     sun_threshold=sun_t,
                     shade_threshold=shade_t,
+                    caution_temp=c,
+                    warning_temp=w,
+                    severe_temp=s,
                 )
             if self._apparent_temp is None:
                 return HeatStatus(
@@ -197,20 +216,32 @@ class HeatService:
                     demo_mode=False,
                     sun_threshold=sun_t,
                     shade_threshold=shade_t,
+                    caution_temp=c,
+                    warning_temp=w,
+                    severe_temp=s,
                 )
             stale = (time.monotonic() - self._last_fetched) > self.POLL_INTERVAL * 1.5
             return HeatStatus(
                 apparent_temp=self._apparent_temp,
-                level=_heat_level(self._apparent_temp),
+                level=self._level(self._apparent_temp),
                 stale=stale,
                 demo_mode=False,
                 sun_threshold=sun_t,
                 shade_threshold=shade_t,
+                caution_temp=c,
+                warning_temp=w,
+                severe_temp=s,
             )
 
     def set_demo_temp(self, temp: float | None):
         with self._lock:
             self._demo_temp = temp
+
+    def set_temp_thresholds(self, caution: float, warning: float, severe: float):
+        with self._lock:
+            self._caution_temp = caution
+            self._warning_temp = warning
+            self._severe_temp = severe
 
     def set_thresholds(self, sun: float, shade: float):
         with self._lock:

@@ -34,6 +34,7 @@ def migrate_legacy_schema(engine) -> None:
             ("precautions", "ALTER TABLE zones ADD COLUMN precautions TEXT NOT NULL DEFAULT ''"),
             ("visible", "ALTER TABLE zones ADD COLUMN visible BOOLEAN NOT NULL DEFAULT 1"),
             ("updated_at", "ALTER TABLE zones ADD COLUMN updated_at DATETIME"),
+            ("paired_zone_id", "ALTER TABLE zones ADD COLUMN paired_zone_id INTEGER REFERENCES zones(id)"),
         ],
         "events": [
             ("site_id", "ALTER TABLE events ADD COLUMN site_id INTEGER REFERENCES sites(id)"),

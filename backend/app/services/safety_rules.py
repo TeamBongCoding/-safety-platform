@@ -8,6 +8,7 @@ ZONE_TYPES = {
     "heavy_equip": {"label": "중장비",    "color": (0, 255, 255)},  # 노랑
     "camera_entry": {"label": "카메라 입구 ROI", "color": (255, 180, 0)},
     "camera_exit": {"label": "카메라 출구 ROI", "color": (255, 0, 180)},
+    "camera_overlap": {"label": "카메라 중복 시야", "color": (180, 0, 255)},  # 보라
 }
 
 SAFETY_ZONE_TYPES = {"no_entry", "fall_risk", "heavy_equip"}

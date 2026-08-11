@@ -106,12 +106,14 @@ class ZoneCreate(BaseModel):
         "heavy_equip",
         "camera_entry",
         "camera_exit",
+        "camera_overlap",
     ] = "no_entry"
     risk_level: Literal["low", "medium", "high", "critical"] = "high"
     description: str = Field(default="", max_length=1000)
     precautions: str = Field(default="", max_length=1000)
     visible: bool = True
     camera_id: int | None = None
+    paired_zone_id: int | None = None
     polygon: list[list[float]] = Field(min_length=3, max_length=50)
 
     @field_validator("name")

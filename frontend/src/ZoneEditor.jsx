@@ -8,6 +8,7 @@ const EMPTY_FORM = {
   description: '',
   precautions: '',
   visible: true,
+  paired_zone_id: null,
 }
 
 const RISK_LEVELS = {
@@ -23,6 +24,7 @@ const ZONE_TYPES = {
   heavy_equip: '중장비 작업반경',
   camera_entry: '카메라 입구 ROI',
   camera_exit: '카메라 출구 ROI',
+  camera_overlap: '카메라 중복 시야',
 }
 
 const clamp = (value) => Math.min(1, Math.max(0, value))
@@ -208,6 +210,10 @@ export default function ZoneEditor({
       setNotice('구역 이름을 먼저 입력하세요.')
       return
     }
+    if (form.zone_type === 'camera_exit' && !form.paired_zone_id) {
+      setNotice('출구 구역은 연결할 입구 구역을 먼저 선택하세요.')
+      return
+    }
     setPhase('drawing')
     setNotice('영상 위를 차례로 클릭하세요. 첫 점을 다시 누르거나 미리보기를 누르면 영역이 닫힙니다.')
   }
@@ -223,6 +229,7 @@ export default function ZoneEditor({
       description: zone.description,
       precautions: zone.precautions,
       visible: zone.visible,
+      paired_zone_id: zone.paired_zone_id ?? null,
     })
     setPoints(zone.polygon)
     setHistory([])
@@ -348,7 +355,7 @@ export default function ZoneEditor({
         ? current.map((zone) => zone.id === saved.id ? saved : zone)
         : [...current, saved])
       resetEditor()
-      setNotice(`‘${saved.name}’ 위험구역 저장 완료`)
+      setNotice(`'${saved.name}' 위험구역 저장 완료`)
     } catch (error) {
       setNotice(error.message)
       onRequestError(error)
@@ -364,7 +371,7 @@ export default function ZoneEditor({
         body: JSON.stringify({ visible: !zone.visible }),
       })
       setZones((current) => current.map((item) => item.id === saved.id ? saved : item))
-      setNotice(`‘${saved.name}’ 표시 설정이 저장되었습니다.`)
+      setNotice(`'${saved.name}' 표시 설정이 저장되었습니다.`)
     } catch (error) {
       setNotice(error.message)
       onRequestError(error)
@@ -372,12 +379,20 @@ export default function ZoneEditor({
   }
 
   const deleteZone = async (zone) => {
-    if (!window.confirm(`‘${zone.name}’ 위험구역을 삭제할까요?`)) return
+    const pairedExit = zone.zone_type === 'camera_entry'
+      ? zones.find((z) => z.paired_zone_id === zone.id)
+      : null
+    const confirmMsg = pairedExit
+      ? `'${zone.name}' 입구 구역을 삭제하면 연결된 출구 구역 '${pairedExit.name}'도 함께 삭제됩니다. 계속할까요?`
+      : `'${zone.name}' 위험구역을 삭제할까요?`
+    if (!window.confirm(confirmMsg)) return
     try {
       await api(`/api/zones/${zone.id}`, { method: 'DELETE' })
-      setZones((current) => current.filter((item) => item.id !== zone.id))
-      if (editingZoneId === zone.id) resetEditor()
-      setNotice(`‘${zone.name}’ 위험구역을 삭제했습니다.`)
+      setZones((current) => current.filter((item) => item.id !== zone.id && item.id !== pairedExit?.id))
+      if (editingZoneId === zone.id || editingZoneId === pairedExit?.id) resetEditor()
+      setNotice(pairedExit
+        ? `'${zone.name}' 및 연결된 출구 구역 '${pairedExit.name}'을 삭제했습니다.`
+        : `'${zone.name}' 위험구역을 삭제했습니다.`)
     } catch (error) {
       setNotice(error.message)
       onRequestError(error)
@@ -500,7 +515,7 @@ export default function ZoneEditor({
               <div className="grid grid-cols-2 gap-2">
                 <label className="block text-xs font-medium text-slate-300">
                   위험 유형
-                  <select value={form.zone_type} onChange={(event) => setForm((current) => ({ ...current, zone_type: event.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
+                  <select value={form.zone_type} onChange={(event) => setForm((current) => ({ ...current, zone_type: event.target.value, paired_zone_id: event.target.value === 'camera_exit' ? current.paired_zone_id : null }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
                     {Object.entries(ZONE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
@@ -511,6 +526,24 @@ export default function ZoneEditor({
                   </select>
                 </label>
               </div>
+              {form.zone_type === 'camera_exit' && (() => {
+                const pairedEntryIds = new Set(
+                  zones.filter((z) => z.zone_type === 'camera_exit' && z.paired_zone_id != null && z.id !== editingZoneId).map((z) => z.paired_zone_id)
+                )
+                const availableEntries = zones.filter((z) => z.zone_type === 'camera_entry' && (!pairedEntryIds.has(z.id) || z.id === form.paired_zone_id))
+                return (
+                  <label className="block text-xs font-medium text-slate-300">
+                    연결 입구 구역 <span className="text-red-400">*</span>
+                    {availableEntries.length === 0
+                      ? <p className="mt-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">연결 가능한 입구 구역이 없습니다. 먼저 입구 구역을 생성하세요.</p>
+                      : <select value={form.paired_zone_id ?? ''} onChange={(event) => setForm((current) => ({ ...current, paired_zone_id: event.target.value ? Number(event.target.value) : null }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
+                          <option value="">— 입구 구역 선택 —</option>
+                          {availableEntries.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                        </select>
+                    }
+                  </label>
+                )
+              })()}
               <label className="block text-xs font-medium text-slate-300">
                 설명
                 <textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} maxLength="1000" rows="2" placeholder="이 구역의 위험 요소를 설명하세요." className="mt-1.5 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500" />
@@ -576,6 +609,18 @@ export default function ZoneEditor({
                       <span className={`rounded-full px-2 py-0.5 text-[10px] ${RISK_LEVELS[zone.risk_level]?.badge || RISK_LEVELS.high.badge}`}>{RISK_LEVELS[zone.risk_level]?.label || '높음'}</span>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">{ZONE_TYPES[zone.zone_type]} · 점 {zone.polygon.length}개</p>
+                    {zone.zone_type === 'camera_exit' && (() => {
+                      const entry = zones.find((z) => z.id === zone.paired_zone_id)
+                      return entry
+                        ? <p className="mt-1 text-xs text-cyan-400">↔ 입구: {entry.name}</p>
+                        : null
+                    })()}
+                    {zone.zone_type === 'camera_entry' && (() => {
+                      const exit = zones.find((z) => z.paired_zone_id === zone.id)
+                      return exit
+                        ? <p className="mt-1 text-xs text-cyan-400">↔ 출구: {exit.name}</p>
+                        : <p className="mt-1 text-xs text-slate-600">출구 미연결</p>
+                    })()}
                     {zone.description && <p className="mt-2 line-clamp-2 text-xs text-slate-400">{zone.description}</p>}
                     {zone.precautions && <p className="mt-1 line-clamp-2 text-xs text-amber-300">주의 · {zone.precautions}</p>}
                   </div>

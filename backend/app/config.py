@@ -63,6 +63,15 @@ REID_IMAGE_SIZE = int(os.getenv("REID_IMAGE_SIZE", "192"))
 REID_ENTRY_GRACE_FRAMES = int(os.getenv("REID_ENTRY_GRACE_FRAMES", "30"))
 REID_ROI_MARGIN = float(os.getenv("REID_ROI_MARGIN", "0.025"))
 REID_BACKEND = os.getenv("REID_BACKEND", "fastreid").lower()
+# 중복 시야(overlap) 실시간 매칭 관련
+REID_OVERLAP_THRESHOLD = float(os.getenv("REID_OVERLAP_THRESHOLD", "0.80"))
+REID_STRONG_MATCH_THRESHOLD = float(os.getenv("REID_STRONG_MATCH_THRESHOLD", "0.82"))
+OVERLAP_TIME_TOLERANCE = float(os.getenv("OVERLAP_TIME_TOLERANCE", "2.0"))
+# 멀티프레임 embedding 안정화
+EMBEDDING_HISTORY_SIZE = int(os.getenv("EMBEDDING_HISTORY_SIZE", "8"))
+EMBEDDING_MIN_QUALITY = float(os.getenv("EMBEDDING_MIN_QUALITY", "0.30"))
+# 헬멧 상태 크로스카메라 집계
+HELMET_VOTE_WINDOW_SECONDS = float(os.getenv("HELMET_VOTE_WINDOW_SECONDS", "5.0"))
 REID_DEVICE = os.getenv("REID_DEVICE", "auto").lower()
 _fastreid_weights = Path(os.getenv(
     "FASTREID_WEIGHTS_PATH",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 import cv2
@@ -12,12 +13,18 @@ import numpy as np
 from shapely.geometry import Point
 
 from ..config import (
+    EMBEDDING_HISTORY_SIZE,
+    EMBEDDING_MIN_QUALITY,
+    HELMET_VOTE_WINDOW_SECONDS,
+    OVERLAP_TIME_TOLERANCE,
     REID_DEEP_WEIGHT,
     REID_ENTRY_GRACE_FRAMES,
     REID_MAX_TRANSITION_SECONDS,
     REID_MIN_SIMILARITY,
+    REID_OVERLAP_THRESHOLD,
     REID_ROI_MARGIN,
     REID_SCORE_THRESHOLD,
+    REID_STRONG_MATCH_THRESHOLD,
     TRACK_MAX_MISSED_FRAMES,
 )
 
@@ -69,12 +76,7 @@ def _direction_score(
 
 
 def appearance_embedding(frame: np.ndarray, box: list[float]) -> tuple[np.ndarray, float]:
-    """Build a normalized person appearance descriptor and crop quality score.
-
-    The descriptor uses spatial HSV/Lab histograms so it works offline. The
-    matching layer is intentionally isolated, allowing a learned OSNet/FastReID
-    embedding to replace this function without changing the tracking flow.
-    """
+    """Build a normalized person appearance descriptor and crop quality score."""
     height, width = frame.shape[:2]
     x1, y1, x2, y2 = [int(round(value)) for value in box]
     x1, x2 = sorted((max(0, x1), min(width, x2)))
@@ -129,7 +131,6 @@ def combined_appearance_embedding(
             deep /= deep_norm
 
     if np.linalg.norm(deep) <= 1e-8:
-        # Preserve a fixed vector layout while keeping color-only fallback useful.
         fused = np.concatenate((deep, color))
     else:
         deep_weight = float(np.clip(REID_DEEP_WEIGHT, 0.0, 1.0))
@@ -153,6 +154,30 @@ def _iou(left: list[float], right: list[float]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+class EmbeddingHistory:
+    """최근 N개의 고품질 embedding을 저장하고 품질 가중 대표 embedding을 계산한다."""
+
+    def __init__(self, maxsize: int = EMBEDDING_HISTORY_SIZE):
+        self._buf: deque = deque(maxlen=maxsize)
+
+    def add(self, embedding: np.ndarray, quality: float) -> None:
+        if quality >= EMBEDDING_MIN_QUALITY:
+            self._buf.append((embedding.copy(), quality))
+
+    def representative(self) -> np.ndarray | None:
+        if not self._buf:
+            return None
+        embs, quals = zip(*self._buf)
+        weights = np.array(quals, dtype=np.float32)
+        stacked = np.stack(embs)
+        weighted = (stacked * weights[:, None]).sum(axis=0)
+        norm = float(np.linalg.norm(weighted))
+        return weighted / norm if norm > 1e-8 else weighted
+
+    def __len__(self) -> int:
+        return len(self._buf)
+
+
 @dataclass
 class TransitionCandidate:
     global_person_id: str
@@ -163,6 +188,16 @@ class TransitionCandidate:
     direction_score: float
 
 
+@dataclass
+class ActiveTrackInfo:
+    """다른 카메라에서 현재 관측 중인 트랙 정보 (중복 시야 매칭용)."""
+    global_person_id: str
+    embedding: np.ndarray
+    quality: float
+    timestamp: float
+    in_overlap_zone: bool
+
+
 class GlobalIdentityManager:
     """Site-scoped global identity state shared by every camera service."""
 
@@ -171,6 +206,14 @@ class GlobalIdentityManager:
         self._next_global_id = 1
         self._pending: list[TransitionCandidate] = []
         self._embeddings: dict[str, np.ndarray] = {}
+        # 중복 시야 실시간 매칭용 활성 트랙 레지스트리
+        self._active_tracks: dict[int, dict[int, ActiveTrackInfo]] = {}
+        # 헬멧 크로스카메라 집계: global_id -> deque of (timestamp, camera_id, helmet_on, quality)
+        self._helmet_observations: dict[str, deque] = {}
+        # ID 병합 앨리어스: drop_id -> canonical_id
+        self._id_aliases: dict[str, str] = {}
+        # pipeline에서 drain해야 할 ID 병합 이벤트 (dropped, canonical)
+        self._pending_merges: list[tuple[str, str]] = []
 
     def _new_id(self) -> str:
         identity = f"person-{self._next_global_id:06d}"
@@ -182,6 +225,62 @@ class GlobalIdentityManager:
             item for item in self._pending
             if timestamp - item.exited_at <= REID_MAX_TRANSITION_SECONDS
         ]
+
+    def _resolve_id_nolock(self, global_person_id: str) -> str:
+        """앨리어스 체인을 따라 정규 Global ID를 반환한다 (lock 없이)."""
+        visited: set[str] = set()
+        current = global_person_id
+        while current in self._id_aliases:
+            next_id = self._id_aliases[current]
+            if next_id in visited:
+                break
+            visited.add(current)
+            current = next_id
+        return current
+
+    def resolve_id(self, global_person_id: str) -> str:
+        """앨리어스 체인을 따라 정규 Global ID를 반환한다."""
+        with self._lock:
+            return self._resolve_id_nolock(global_person_id)
+
+    def _merge_ids_nolock(self, keep_id: str, drop_id: str) -> None:
+        """drop_id를 keep_id로 병합한다 (caller가 lock 보유해야 함)."""
+        if keep_id == drop_id:
+            return
+        # 앨리어스 등록
+        self._id_aliases[drop_id] = keep_id
+        # 임베딩 병합
+        keep_emb = self._embeddings.get(keep_id)
+        drop_emb = self._embeddings.pop(drop_id, None)
+        if drop_emb is not None:
+            if keep_emb is not None:
+                merged = keep_emb * 0.6 + drop_emb * 0.4
+                norm = float(np.linalg.norm(merged))
+                self._embeddings[keep_id] = merged / norm if norm > 1e-8 else merged
+            else:
+                self._embeddings[keep_id] = drop_emb
+        # pending 전환 후보 업데이트
+        for cand in self._pending:
+            if cand.global_person_id == drop_id:
+                cand.global_person_id = keep_id
+        # active_tracks 업데이트
+        for cam_tracks in self._active_tracks.values():
+            for info in cam_tracks.values():
+                if info.global_person_id == drop_id:
+                    info.global_person_id = keep_id
+        # 헬멧 관측 이전
+        drop_obs = self._helmet_observations.pop(drop_id, None)
+        if drop_obs:
+            keep_obs = self._helmet_observations.setdefault(keep_id, deque(maxlen=50))
+            keep_obs.extend(drop_obs)
+        # pipeline이 HeatExposureTracker를 업데이트할 수 있도록 병합 이벤트 기록
+        self._pending_merges.append((drop_id, keep_id))
+
+    def drain_pending_merges(self) -> list[tuple[str, str]]:
+        """pipeline이 HeatExposureTracker ID 병합에 사용할 이벤트 목록을 반환하고 초기화한다."""
+        with self._lock:
+            result, self._pending_merges = self._pending_merges, []
+            return result
 
     def _match_pending(
         self,
@@ -207,7 +306,6 @@ class GlobalIdentityManager:
             if reid_score < REID_MIN_SIMILARITY:
                 continue
             time_score = max(0.0, 1.0 - elapsed / REID_MAX_TRANSITION_SECONDS)
-            # 진입 방향을 모를 때(0.5 기본값) 패널티를 주지 않도록 후보 방향만 사용
             if direction == (0.0, 0.0):
                 direction_score = candidate.direction_score
             else:
@@ -250,16 +348,11 @@ class GlobalIdentityManager:
         with self._lock:
             self._purge_expired(timestamp)
             matched = self._match_pending(
-                camera_id,
-                embedding,
-                quality,
-                point,
-                direction,
-                entry_zones,
-                timestamp,
+                camera_id, embedding, quality, point, direction, entry_zones, timestamp,
             )
             if matched is not None:
-                return matched
+                global_id, details = matched
+                return self._resolve_id_nolock(global_id), details
 
             global_id = self._new_id()
             self._embeddings[global_id] = embedding.copy()
@@ -278,24 +371,23 @@ class GlobalIdentityManager:
         """Retry a hand-off while a newly entered track is still in its grace period."""
         with self._lock:
             self._purge_expired(timestamp)
-            return self._match_pending(
-                camera_id,
-                embedding,
-                quality,
-                entry_point,
-                direction,
-                entry_zones,
-                timestamp,
+            result = self._match_pending(
+                camera_id, embedding, quality, entry_point, direction, entry_zones, timestamp,
             )
+            if result is not None:
+                global_id, details = result
+                return self._resolve_id_nolock(global_id), details
+            return None
 
     def update_embedding(self, global_person_id: str, embedding: np.ndarray, quality: float):
-        if quality < 0.35:
+        if quality < EMBEDDING_MIN_QUALITY:
             return
         with self._lock:
-            current = self._embeddings.get(global_person_id)
+            canonical = self._resolve_id_nolock(global_person_id)
+            current = self._embeddings.get(canonical)
             mixed = embedding if current is None else current * 0.7 + embedding * 0.3
             norm = float(np.linalg.norm(mixed))
-            self._embeddings[global_person_id] = mixed / norm if norm > 1e-8 else mixed
+            self._embeddings[canonical] = mixed / norm if norm > 1e-8 else mixed
 
     def register_departure(
         self,
@@ -318,7 +410,7 @@ class GlobalIdentityManager:
             return False
         import logging
         logging.getLogger(__name__).info(
-            "[Re-ID] cam%s %s 출구 등록 → 전환대기 추가 (foot=%.3f,%.3f)",
+            "[Re-ID] cam%s %s 출구 등록 (foot=%.3f,%.3f)",
             camera_id, global_person_id, point[0], point[1],
         )
         candidate = TransitionCandidate(
@@ -347,6 +439,150 @@ class GlobalIdentityManager:
             ]
             return len(self._pending)
 
+    # ── 중복 시야(Overlap Zone) 실시간 매칭 ──────────────────────────────────
+
+    def register_active_track(
+        self,
+        camera_id: int | None,
+        local_track_id: int,
+        global_person_id: str,
+        embedding: np.ndarray,
+        quality: float,
+        timestamp: float,
+        in_overlap_zone: bool,
+    ) -> None:
+        """카메라별 활성 트랙 정보를 갱신한다 (중복 시야 매칭 기반 데이터)."""
+        cam_key = camera_id if camera_id is not None else -1
+        with self._lock:
+            cam = self._active_tracks.setdefault(cam_key, {})
+            cam[local_track_id] = ActiveTrackInfo(
+                global_person_id=self._resolve_id_nolock(global_person_id),
+                embedding=embedding.copy(),
+                quality=quality,
+                timestamp=timestamp,
+                in_overlap_zone=in_overlap_zone,
+            )
+
+    def purge_inactive_tracks(
+        self,
+        camera_id: int | None,
+        active_local_ids: set[int],
+        timestamp: float,
+    ) -> None:
+        """이번 프레임에 없어진 트랙을 레지스트리에서 제거한다."""
+        cam_key = camera_id if camera_id is not None else -1
+        stale_cutoff = OVERLAP_TIME_TOLERANCE * 3
+        with self._lock:
+            if cam_key in self._active_tracks:
+                self._active_tracks[cam_key] = {
+                    lid: info
+                    for lid, info in self._active_tracks[cam_key].items()
+                    if lid in active_local_ids
+                    and timestamp - info.timestamp <= stale_cutoff
+                }
+
+    def try_overlap_match(
+        self,
+        camera_id: int | None,
+        local_track_id: int,
+        global_person_id: str,
+        embedding: np.ndarray,
+        quality: float,
+        timestamp: float,
+    ) -> str | None:
+        """중복 시야 영역에서 다른 카메라 트랙과 비교하여 동일인이면 Global ID를 병합한다.
+
+        Returns: 병합 후 canonical global_person_id (병합이 일어난 경우만), 아니면 None.
+        """
+        cam_key = camera_id if camera_id is not None else -1
+        best_score = REID_OVERLAP_THRESHOLD - 0.001
+        best_other_canonical: str | None = None
+
+        with self._lock:
+            canonical = self._resolve_id_nolock(global_person_id)
+
+            for other_cam_key, other_tracks in self._active_tracks.items():
+                if other_cam_key == cam_key:
+                    continue
+                for other_local_id, other_info in other_tracks.items():
+                    if not other_info.in_overlap_zone:
+                        continue
+                    time_diff = abs(timestamp - other_info.timestamp)
+                    if time_diff > OVERLAP_TIME_TOLERANCE:
+                        continue
+                    other_canonical = self._resolve_id_nolock(other_info.global_person_id)
+                    if other_canonical == canonical:
+                        continue  # 이미 같은 ID
+                    sim = _cosine_similarity(embedding, other_info.embedding)
+                    if sim < REID_STRONG_MATCH_THRESHOLD:
+                        continue
+                    # 70% similarity + 20% quality + 10% time proximity
+                    time_score = max(0.0, 1.0 - time_diff / max(OVERLAP_TIME_TOLERANCE, 1e-6))
+                    score = (
+                        0.70 * sim
+                        + 0.20 * min(quality, other_info.quality)
+                        + 0.10 * time_score
+                    )
+                    if score > best_score:
+                        best_score = score
+                        best_other_canonical = other_canonical
+
+            if best_other_canonical is None:
+                return None
+
+            # 더 낮은 번호(먼저 생성된) ID를 canonical로 유지
+            try:
+                a_num = int(canonical.split("-")[1])
+                b_num = int(best_other_canonical.split("-")[1])
+            except (IndexError, ValueError):
+                a_num, b_num = 0, 1
+            keep = canonical if a_num <= b_num else best_other_canonical
+            drop = best_other_canonical if a_num <= b_num else canonical
+            self._merge_ids_nolock(keep, drop)
+            return keep
+
+    # ── 헬멧 크로스카메라 집계 ───────────────────────────────────────────────
+
+    def update_helmet(
+        self,
+        global_person_id: str,
+        camera_id: int | None,
+        helmet_on: bool,
+        quality: float,
+        timestamp: float,
+    ) -> None:
+        """카메라 프레임의 헬멧 감지 결과를 Global ID에 누적한다."""
+        with self._lock:
+            canonical = self._resolve_id_nolock(global_person_id)
+            obs = self._helmet_observations.setdefault(canonical, deque(maxlen=50))
+            obs.append((timestamp, camera_id, helmet_on, quality))
+
+    def get_helmet_status(self, global_person_id: str) -> bool | None:
+        """최근 HELMET_VOTE_WINDOW 초의 품질 가중 다수결로 헬멧 착용 여부를 반환한다.
+
+        단일 카메라만 관측 중일 때는 None을 반환해 단순 frame-level 결과를 사용하게 한다.
+        복수 카메라 데이터가 있을 때만 크로스카메라 집계를 사용한다.
+        """
+        with self._lock:
+            canonical = self._resolve_id_nolock(global_person_id)
+            obs = self._helmet_observations.get(canonical)
+            if not obs:
+                return None
+            now = time.monotonic()
+            recent = [(ts, cam, h, q) for ts, cam, h, q in obs if now - ts <= HELMET_VOTE_WINDOW_SECONDS]
+            if not recent:
+                return None
+            # 복수 카메라 관측이 있을 때만 집계 결과 사용
+            cameras_seen = {cam for _, cam, _, _ in recent}
+            if len(cameras_seen) < 2:
+                return None
+            on_weight = sum(q for _, _, h, q in recent if h)
+            off_weight = sum(q for _, _, h, q in recent if not h)
+            total = on_weight + off_weight
+            if total < 0.01:
+                return None
+            return on_weight >= off_weight
+
 
 @dataclass
 class LocalTrack:
@@ -366,8 +602,11 @@ class LocalTrack:
     exit_point: tuple[float, float] | None = None
     exit_direction: tuple[float, float] = (0.0, 0.0)
     exit_candidate_registered: bool = False
+    in_overlap_zone: bool = False
     # (timestamp, 'sun'|'shade'|'unknown') 최근 10초 이력
     _shade_history: list = field(default_factory=list)
+    # 멀티프레임 embedding 안정화 이력
+    _emb_history: EmbeddingHistory = field(default_factory=EmbeddingHistory)
 
     @property
     def point(self) -> tuple[float, float]:
@@ -403,6 +642,21 @@ class LocalTrack:
         cutoff = now - 10.0
         self._shade_history = [(t, s) for t, s in self._shade_history if t >= cutoff]
 
+    def update_embedding_stable(self, new_embedding: np.ndarray, new_quality: float) -> None:
+        """EmbeddingHistory를 활용한 멀티프레임 안정화 embedding 업데이트."""
+        self._emb_history.add(new_embedding, new_quality)
+        rep = self._emb_history.representative()
+        if rep is not None and new_quality >= self.quality * 0.8:
+            # 대표 embedding(히스토리 평균)과 현재 EMA를 절충
+            mixed = self.embedding * 0.60 + rep * 0.25 + new_embedding * 0.15
+            norm = float(np.linalg.norm(mixed))
+            self.embedding = mixed / norm if norm > 1e-8 else mixed
+        elif new_quality >= self.quality * 0.8:
+            mixed = self.embedding * 0.75 + new_embedding * 0.25
+            norm = float(np.linalg.norm(mixed))
+            self.embedding = mixed / norm if norm > 1e-8 else mixed
+        self.quality = max(self.quality * 0.98, new_quality)
+
 
 class HeatExposureTracker:
     """global_person_id별 폭염구역 연속 체류 시간을 추적한다 (크로스카메라)."""
@@ -411,7 +665,6 @@ class HeatExposureTracker:
 
     def __init__(self):
         self._lock = threading.Lock()
-        # global_person_id -> {"last_seen": float, "heat_start": float | None}
         self._state: dict[str, dict] = {}
 
     def update(self, global_person_id: str, in_heat: bool, now: float | None = None) -> float:
@@ -436,6 +689,30 @@ class HeatExposureTracker:
             if in_heat and state["heat_start"] is not None:
                 return now - state["heat_start"]
             return 0.0
+
+    def merge_ids(self, old_id: str, new_id: str) -> None:
+        """ID 병합 시 old_id의 열 노출 누적 시간을 new_id로 이전한다."""
+        with self._lock:
+            old_state = self._state.pop(old_id, None)
+            if old_state is None:
+                return
+            new_state = self._state.get(new_id)
+            if new_state is None:
+                self._state[new_id] = old_state
+            else:
+                # 더 이른 heat_start를 채택해 누적 시간을 최대한 보존
+                if (
+                    old_state.get("heat_start") is not None
+                    and (
+                        new_state.get("heat_start") is None
+                        or old_state["heat_start"] < new_state["heat_start"]
+                    )
+                ):
+                    new_state["heat_start"] = old_state["heat_start"]
+                new_state["last_seen"] = max(
+                    old_state.get("last_seen", 0.0),
+                    new_state.get("last_seen", 0.0),
+                )
 
     def purge_stale(self, now: float | None = None):
         if now is None:
@@ -464,9 +741,13 @@ class CameraPersonTracker:
         height: int,
         entry_zones: list[dict],
         exit_zones: list[dict],
+        overlap_zones: list[dict] | None = None,
         timestamp: float | None = None,
     ) -> list[LocalTrack]:
         timestamp = timestamp if timestamp is not None else time.monotonic()
+        overlap_zones = overlap_zones or []
+
+        # Phase 1 — 관측값 구성
         observations = []
         for detection in detections:
             color_embedding, visual_quality = appearance_embedding(frame, detection["box"])
@@ -483,6 +764,7 @@ class CameraPersonTracker:
                 "reid_backend": detection.get("reid_backend", "appearance"),
             })
 
+        # Phase 2 — 기존 트랙과 관측값 매칭
         pairs: list[tuple[float, int, int]] = []
         diagonal = math.hypot(width, height)
         for local_id, track in self._tracks.items():
@@ -497,6 +779,7 @@ class CameraPersonTracker:
                 if overlap >= 0.08 or distance <= 0.12:
                     pairs.append((score, local_id, observation_index))
 
+        # Phase 3 — 매칭된 트랙 업데이트
         matched_tracks: set[int] = set()
         matched_observations: set[int] = set()
         for _, local_id, observation_index in sorted(pairs, reverse=True):
@@ -505,6 +788,12 @@ class CameraPersonTracker:
             track = self._tracks[local_id]
             observation = observations[observation_index]
             detection = observation["detection"]
+
+            # 다른 카메라에서 발생한 ID 병합을 반영한다
+            canonical = self.identity_manager.resolve_id(track.global_person_id)
+            if canonical != track.global_person_id:
+                track.global_person_id = canonical
+
             track.box = detection["box"]
             track.confidence = float(detection.get("conf", 0.0))
             track.reid_backend = observation["reid_backend"]
@@ -512,11 +801,10 @@ class CameraPersonTracker:
             track.points = track.points[-20:]
             track.missed = 0
             track.age_frames += 1
-            if observation["quality"] >= track.quality * 0.8:
-                mixed = track.embedding * 0.75 + observation["embedding"] * 0.25
-                norm = float(np.linalg.norm(mixed))
-                track.embedding = mixed / norm if norm > 1e-8 else mixed
-            track.quality = max(track.quality * 0.98, observation["quality"])
+
+            # 멀티프레임 안정화 embedding 업데이트
+            track.update_embedding_stable(observation["embedding"], observation["quality"])
+
             if track.entry_point is None and _point_in_any(track.point, entry_zones):
                 track.entry_point = track.point
                 track.entry_grace_remaining = REID_ENTRY_GRACE_FRAMES
@@ -552,12 +840,14 @@ class CameraPersonTracker:
                 if matched is not None:
                     track.global_person_id, track.match_details = matched
                 track.entry_grace_remaining -= 1
+
             self.identity_manager.update_embedding(
                 track.global_person_id, track.embedding, track.quality
             )
             matched_tracks.add(local_id)
             matched_observations.add(observation_index)
 
+        # Phase 4 — 놓친 트랙 처리
         for local_id, track in list(self._tracks.items()):
             if local_id in matched_tracks:
                 continue
@@ -576,6 +866,7 @@ class CameraPersonTracker:
                     )
                 del self._tracks[local_id]
 
+        # Phase 5 — 새 트랙 생성
         for index, observation in enumerate(observations):
             if index in matched_observations:
                 continue
@@ -629,7 +920,43 @@ class CameraPersonTracker:
             self._tracks[local_id] = new_track
             matched_tracks.add(local_id)
 
-        return [self._tracks[local_id] for local_id in sorted(matched_tracks)]
+        # Phase 6 — 중복 시야(Overlap Zone) 실시간 매칭 및 활성 트랙 등록
+        active_local_ids: set[int] = set()
+        for local_id, track in self._tracks.items():
+            in_overlap = _point_in_any(track.point, overlap_zones) is not None
+            track.in_overlap_zone = in_overlap
+            active_local_ids.add(local_id)
+
+            self.identity_manager.register_active_track(
+                self.camera_id,
+                local_id,
+                track.global_person_id,
+                track.embedding,
+                track.quality,
+                timestamp,
+                in_overlap,
+            )
+
+        # 중복 시야 영역의 트랙에 대해 다른 카메라 트랙과 실시간 매칭
+        for local_id, track in list(self._tracks.items()):
+            if not track.in_overlap_zone or track.quality < EMBEDDING_MIN_QUALITY:
+                continue
+            canonical = self.identity_manager.try_overlap_match(
+                self.camera_id,
+                local_id,
+                track.global_person_id,
+                track.embedding,
+                track.quality,
+                timestamp,
+            )
+            if canonical is not None and canonical != track.global_person_id:
+                track.global_person_id = canonical
+                if track.match_details is None:
+                    track.match_details = {"merged_via": "overlap_zone"}
+
+        self.identity_manager.purge_inactive_tracks(self.camera_id, active_local_ids, timestamp)
+
+        return [self._tracks[local_id] for local_id in sorted(matched_tracks) if local_id in self._tracks]
 
     def flush(self, exit_zones: list[dict], timestamp: float | None = None):
         timestamp = timestamp if timestamp is not None else time.monotonic()

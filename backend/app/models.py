@@ -83,6 +83,7 @@ class Zone(Base):
     visible: Mapped[bool] = mapped_column(Boolean, default=True)
     polygon: Mapped[str] = mapped_column(Text)           # 0~1 정규화 좌표 JSON 문자열
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    paired_zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id"), nullable=True)
 
 class Event(Base):
     __tablename__ = "events"

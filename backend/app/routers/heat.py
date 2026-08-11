@@ -26,6 +26,9 @@ def get_heat_status(site: Site = Depends(require_current_site)):
         "demo_mode": status.demo_mode,
         "sun_threshold": status.sun_threshold,
         "shade_threshold": status.shade_threshold,
+        "caution_temp": status.caution_temp,
+        "warning_temp": status.warning_temp,
+        "severe_temp": status.severe_temp,
     }
 
 
@@ -49,4 +52,17 @@ class ThresholdPayload(BaseModel):
 def set_thresholds(payload: ThresholdPayload, site: Site = Depends(require_current_site)):
     """밝기 비율 임계값을 설정한다."""
     _svc(site).set_thresholds(payload.sun_threshold, payload.shade_threshold)
+    return {"ok": True}
+
+
+class TempThresholdPayload(BaseModel):
+    caution_temp: float = 31.0
+    warning_temp: float = 33.0
+    severe_temp: float = 38.0
+
+
+@router.patch("/temp-thresholds")
+def set_temp_thresholds(payload: TempThresholdPayload, site: Site = Depends(require_current_site)):
+    """폭염 단계별 체감온도 임계값을 설정한다."""
+    _svc(site).set_temp_thresholds(payload.caution_temp, payload.warning_temp, payload.severe_temp)
     return {"ok": True}

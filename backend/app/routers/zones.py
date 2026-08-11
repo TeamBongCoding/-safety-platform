@@ -25,6 +25,7 @@ def serialize_zone(zone: Zone) -> ZoneOut:
         visible=zone.visible,
         polygon=json.loads(zone.polygon),
         updated_at=zone.updated_at,
+        paired_zone_id=zone.paired_zone_id,
     )
 
 
@@ -51,6 +52,44 @@ def require_site_zone(zone_id: int, site: Site, db: Session) -> Zone:
     return zone
 
 
+def validate_exit_pairing(
+    payload: ZoneCreate,
+    site: Site,
+    db: Session,
+    exclude_exit_id: int | None = None,
+) -> None:
+    """camera_exit 구역은 반드시 camera_entry와 1:1로 연결되어야 한다."""
+    if payload.zone_type != "camera_exit":
+        return
+    if not payload.paired_zone_id:
+        raise HTTPException(
+            status_code=422,
+            detail="출구 구역은 반드시 연결할 입구 구역을 지정해야 합니다.",
+        )
+    entry = db.scalar(
+        select(Zone).where(
+            Zone.id == payload.paired_zone_id,
+            Zone.site_id == site.id,
+            Zone.camera_id == payload.camera_id,
+            Zone.zone_type == "camera_entry",
+        )
+    )
+    if not entry:
+        raise HTTPException(status_code=422, detail="연결할 입구 구역을 찾을 수 없습니다.")
+    existing_exit_q = select(Zone).where(
+        Zone.paired_zone_id == payload.paired_zone_id,
+        Zone.zone_type == "camera_exit",
+    )
+    if exclude_exit_id is not None:
+        existing_exit_q = existing_exit_q.where(Zone.id != exclude_exit_id)
+    existing_exit = db.scalar(existing_exit_q)
+    if existing_exit:
+        raise HTTPException(
+            status_code=409,
+            detail=f"이 입구 구역은 이미 출구 구역 '{existing_exit.name}'과 연결되어 있습니다.",
+        )
+
+
 @router.get("", response_model=list[ZoneOut])
 def list_zones(
     camera_id: int | None = Query(default=None),
@@ -73,6 +112,7 @@ def create_zone(
 ):
     require_site_camera(payload.camera_id, site, db)
     require_valid_polygon(payload.polygon)
+    validate_exit_pairing(payload, site, db)
     zone = Zone(
         site_id=site.id,
         camera_id=payload.camera_id,
@@ -83,6 +123,7 @@ def create_zone(
         precautions=payload.precautions.strip(),
         visible=payload.visible,
         polygon=json.dumps(payload.polygon),
+        paired_zone_id=payload.paired_zone_id if payload.zone_type == "camera_exit" else None,
     )
     db.add(zone)
     db.commit()
@@ -102,6 +143,7 @@ def update_zone(
     if payload.camera_id != zone.camera_id:
         raise HTTPException(status_code=409, detail="위험구역의 카메라는 변경할 수 없습니다.")
     require_valid_polygon(payload.polygon)
+    validate_exit_pairing(payload, site, db, exclude_exit_id=zone_id)
     zone.name = payload.name.strip()
     zone.zone_type = payload.zone_type
     zone.risk_level = payload.risk_level
@@ -109,6 +151,7 @@ def update_zone(
     zone.precautions = payload.precautions.strip()
     zone.visible = payload.visible
     zone.polygon = json.dumps(payload.polygon)
+    zone.paired_zone_id = payload.paired_zone_id if payload.zone_type == "camera_exit" else None
     db.commit()
     db.refresh(zone)
     return serialize_zone(zone)
@@ -135,5 +178,12 @@ def delete_zone(
     db: Session = Depends(get_db),
 ):
     zone = require_site_zone(zone_id, site, db)
+    # 입구 구역 삭제 시 연결된 출구 구역도 함께 삭제한다
+    if zone.zone_type == "camera_entry":
+        paired_exit = db.scalar(
+            select(Zone).where(Zone.paired_zone_id == zone.id)
+        )
+        if paired_exit:
+            db.delete(paired_exit)
     db.delete(zone)
     db.commit()

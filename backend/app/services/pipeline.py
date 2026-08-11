@@ -26,9 +26,16 @@ def process_frame(
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
     entry_zones = [zone for zone in zones if zone["zone_type"] == "camera_entry"]
     exit_zones = [zone for zone in zones if zone["zone_type"] == "camera_exit"]
-    tracks = tracker.update(frame, persons, w, h, entry_zones, exit_zones)
+    overlap_zones = [zone for zone in zones if zone["zone_type"] == "camera_overlap"]
+    tracks = tracker.update(
+        frame, persons, w, h, entry_zones, exit_zones, overlap_zones=overlap_zones
+    )
 
-    # 야외 카메라이고 체감온도가 기준 이상일 때만 밝기 분석 수행
+    # HeatExposureTracker ID 병합 이벤트 처리 (Overlap Zone 매칭으로 발생)
+    if heat_exposure_tracker is not None:
+        for dropped_id, canonical_id in identity_manager.drain_pending_merges():
+            heat_exposure_tracker.merge_ids(dropped_id, canonical_id)
+
     heat_level = heat_status.level if heat_status is not None else "inactive"
     sun_threshold = heat_status.sun_threshold if heat_status is not None else 1.15
     shade_threshold = heat_status.shade_threshold if heat_status is not None else 0.85
@@ -44,6 +51,20 @@ def process_frame(
         foot = track.point
         zone_status, zone = locate(foot, zones)
         helmet_on = match_helmet_to_person(track.box, helmets)
+
+        # 헬멧 관측을 Global ID에 누적 (크로스카메라 집계용)
+        identity_manager.update_helmet(
+            track.global_person_id,
+            tracker.camera_id,
+            helmet_on,
+            track.quality,
+            _now,
+        )
+        # 복수 카메라 데이터가 있을 때만 크로스카메라 집계 결과 사용
+        cross_cam_helmet = identity_manager.get_helmet_status(track.global_person_id)
+        if cross_cam_helmet is not None:
+            helmet_on = cross_cam_helmet
+
         level, reasons = evaluate(zone_status, zone, helmet_on)
         zone_label = ZONE_TYPES[zone["zone_type"]]["label"] if zone else None
 
@@ -90,6 +111,7 @@ def process_frame(
             ),
             "shade_status": shade,
             "rest_needed": rest_needed,
+            "in_overlap_zone": track.in_overlap_zone,
         }
         workers.append(worker)
 
@@ -102,13 +124,16 @@ def process_frame(
             })
 
     if include_status:
+        unique_person_count = len({w["global_person_id"] for w in workers})
         return frame, events, {
             "workers": workers,
             "worker_count": len(workers),
+            "unique_person_count": unique_person_count,
             "no_helmet_count": sum(not worker["helmet_on"] for worker in workers),
             "transition_candidate_count": identity_manager.pending_count(),
             "entry_roi_count": len(entry_zones),
             "exit_roi_count": len(exit_zones),
+            "overlap_roi_count": len(overlap_zones),
             "reid_backend": workers[0]["reid_backend"] if workers else None,
         }
     return frame, events
