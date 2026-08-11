@@ -40,6 +40,7 @@ def migrate_legacy_schema(engine) -> None:
             ("site_id", "ALTER TABLE events ADD COLUMN site_id INTEGER REFERENCES sites(id)"),
             ("camera_id", "ALTER TABLE events ADD COLUMN camera_id INTEGER REFERENCES cameras(id)"),
             ("worker_id", "ALTER TABLE events ADD COLUMN worker_id INTEGER REFERENCES workers(id)"),
+            ("track_id", "ALTER TABLE events ADD COLUMN track_id VARCHAR(50)"),
         ],
     }
 

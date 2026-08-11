@@ -14,6 +14,21 @@ const levelStyles = {
 const eventLabels = {
   no_helmet: '안전모 미착용',
   zone_intrusion: '위험구역 침입',
+  stagger: '휘청거림 감지',
+  sudden_sit: '주저앉음 감지',
+  fall: '쓰러짐 감지',
+  fall_still: '쓰러짐+장시간 정지',
+  heat_stagger: '폭염 휘청거림 감지',
+  heat_sudden_sit: '폭염 주저앉음 감지',
+  heat_fall: '폭염 쓰러짐 감지',
+  heat_fall_still: '폭염 쓰러짐+장시간 정지',
+}
+
+const behaviorStyles = {
+  STAGGER:    'bg-amber-500/15 text-amber-300',
+  SUDDEN_SIT: 'bg-orange-500/15 text-orange-300',
+  FALL:       'bg-red-500/20 text-red-300',
+  FALL_STILL: 'bg-red-600/30 text-red-200',
 }
 
 export default function App() {
@@ -529,6 +544,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 <tr>
                   <th className="px-5 py-3 font-medium">발생 시각</th>
                   <th className="px-5 py-3 font-medium">경고 유형</th>
+                  <th className="px-5 py-3 font-medium">감지 ID</th>
                   <th className="px-5 py-3 font-medium">구역</th>
                   <th className="px-5 py-3 font-medium">신뢰도</th>
                   <th className="px-5 py-3 font-medium">상태</th>
@@ -539,6 +555,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
                   <tr key={event.id} className="text-slate-300 hover:bg-slate-800/40">
                     <td className="whitespace-nowrap px-5 py-3 text-slate-400">{formatDate(event.timestamp)}</td>
                     <td className="px-5 py-3 font-medium text-red-300">{eventLabels[event.event_type] ?? event.event_type}</td>
+                    <td className="px-5 py-3 tabular-nums text-cyan-300 text-xs">{event.track_id ? event.track_id.replace('person-', '#') : '-'}</td>
                     <td className="px-5 py-3">{event.zone_id ? `구역 ${event.zone_id}` : '일반구역'}</td>
                     <td className="px-5 py-3 tabular-nums">{Math.round(event.confidence * 100)}%</td>
                     <td className="px-5 py-3">
@@ -547,7 +564,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
                       )}
                     </td>
                   </tr>
-                )) : <tr><td colSpan="5" className="px-5 py-10 text-center text-slate-500">현재 현장에 저장된 안전 이벤트가 없습니다.</td></tr>}
+                )) : <tr><td colSpan="6" className="px-5 py-10 text-center text-slate-500">현재 현장에 저장된 안전 이벤트가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -629,6 +646,11 @@ function WorkerCard({ worker }) {
         <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">입구 ROI 전환 후보 비교 중</p>
       )}
       {worker.reasons?.length > 0 && <p className="mt-1 text-xs font-medium">{worker.reasons.join(' · ')}</p>}
+      {worker.behavior_state && worker.behavior_state !== 'NORMAL' && (
+        <p className={`mt-2 rounded-md px-2 py-1.5 text-xs font-semibold ${behaviorStyles[worker.behavior_state] ?? 'bg-slate-700/30 text-slate-300'}`}>
+          {worker.behavior_state === 'FALL_STILL' || worker.behavior_state === 'FALL' ? '🚨' : '⚠'} {worker.behavior_label ?? worker.behavior_state}
+        </p>
+      )}
     </article>
   )
 }

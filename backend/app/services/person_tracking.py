@@ -662,31 +662,64 @@ class HeatExposureTracker:
     """global_person_id별 폭염구역 연속 체류 시간을 추적한다 (크로스카메라)."""
 
     ABSENCE_RESET_SECONDS = 20.0
+    # 중복 시야에서 OR 판정용 투표 유효 시간 — 이 창 안에 어느 카메라라도 양지면 양지로 처리
+    SUN_VOTE_WINDOW = 2.0
 
     def __init__(self):
         self._lock = threading.Lock()
+        # global_person_id -> {"last_seen", "heat_start", "camera_votes": {cam_id: (ts, bool)}}
         self._state: dict[str, dict] = {}
 
-    def update(self, global_person_id: str, in_heat: bool, now: float | None = None) -> float:
-        """폭염구역 체류 상태를 갱신하고 연속 체류 초를 반환한다."""
+    def update(
+        self,
+        global_person_id: str,
+        in_heat: bool,
+        now: float | None = None,
+        camera_id=None,
+    ) -> float:
+        """폭염구역 체류 상태를 갱신하고 연속 체류 초를 반환한다.
+
+        camera_id를 전달하면 중복 시야 OR 로직이 활성화된다:
+        여러 카메라 중 하나라도 양지로 판단하면 양지로 처리한다.
+        """
         if now is None:
             now = time.monotonic()
         with self._lock:
             state = self._state.get(global_person_id)
             if state is None:
-                state = {"last_seen": now, "heat_start": now if in_heat else None}
+                state = {
+                    "last_seen": now,
+                    "heat_start": now if in_heat else None,
+                    "camera_votes": {},
+                }
                 self._state[global_person_id] = state
             else:
                 gap = now - state["last_seen"]
                 state["last_seen"] = now
                 if gap >= self.ABSENCE_RESET_SECONDS:
-                    state["heat_start"] = now if in_heat else None
-                elif in_heat:
-                    if state["heat_start"] is None:
-                        state["heat_start"] = now
-                else:
+                    # 오래 자리를 비웠으면 투표 이력도 초기화
                     state["heat_start"] = None
-            if in_heat and state["heat_start"] is not None:
+                    state.setdefault("camera_votes", {}).clear()
+
+            # 이번 카메라 판정 기록
+            if camera_id is not None:
+                state.setdefault("camera_votes", {})[camera_id] = (now, in_heat)
+
+            # OR 로직: SUN_VOTE_WINDOW 내에 하나라도 양지 판정이 있으면 양지로 확정
+            votes = state.get("camera_votes", {})
+            effective_in_heat = in_heat or any(
+                vote
+                for ts, vote in votes.values()
+                if vote and now - ts <= self.SUN_VOTE_WINDOW
+            )
+
+            if effective_in_heat:
+                if state.get("heat_start") is None:
+                    state["heat_start"] = now
+            else:
+                state["heat_start"] = None
+
+            if effective_in_heat and state.get("heat_start") is not None:
                 return now - state["heat_start"]
             return 0.0
 
@@ -713,6 +746,12 @@ class HeatExposureTracker:
                     old_state.get("last_seen", 0.0),
                     new_state.get("last_seen", 0.0),
                 )
+                # camera_votes 병합 (최신 판정 유지)
+                old_votes = old_state.get("camera_votes", {})
+                new_votes = new_state.setdefault("camera_votes", {})
+                for cam, (ts, vote) in old_votes.items():
+                    if cam not in new_votes or new_votes[cam][0] < ts:
+                        new_votes[cam] = (ts, vote)
 
     def purge_stale(self, now: float | None = None):
         if now is None:

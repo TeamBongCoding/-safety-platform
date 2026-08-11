@@ -155,6 +155,7 @@ class EventOut(BaseModel):
     timestamp: datetime
     event_type: str
     zone_id: int | None
+    track_id: str | None = None
     snapshot_path: str | None
     confidence: float
     resolved: bool

@@ -91,8 +91,9 @@ class Event(Base):
     site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
     camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True)
     worker_id: Mapped[int | None] = mapped_column(ForeignKey("workers.id"), nullable=True)
+    track_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
-    event_type: Mapped[str] = mapped_column(String(30))  # no_helmet | zone_intrusion
+    event_type: Mapped[str] = mapped_column(String(30))  # no_helmet | zone_intrusion | fall | heat_fall …
     zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id"), nullable=True)
     snapshot_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)

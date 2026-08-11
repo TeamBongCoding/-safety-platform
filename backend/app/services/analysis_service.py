@@ -15,10 +15,11 @@ import numpy as np
 from shapely.geometry import Polygon
 from sqlalchemy import func, select
 
-from ..config import ANALYSIS_ENABLED, PROJECT_ROOT, VIDEO_SOURCE
+from ..config import ANALYSIS_ENABLED, POSE_INFER_EVERY, PROJECT_ROOT, VIDEO_SOURCE
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
 from .person_tracking import CameraPersonTracker, GlobalIdentityManager, HeatExposureTracker
+from .pose_detector import pose_detector
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
 INFER_EVERY = 3
@@ -247,6 +248,7 @@ class AnalysisService:
                 camera_id=self.camera_id,
                 event_type=event["type"],
                 zone_id=event.get("zone_id"),
+                track_id=event.get("track_id"),
                 confidence=event.get("confidence", 0.0),
             ))
 
@@ -283,6 +285,7 @@ class AnalysisService:
             rate_frames = 0
             processing_fps = 0.0
             detections = []
+            pose_detections = []
             frame_index = 0
 
             self._set_status(
@@ -304,6 +307,8 @@ class AnalysisService:
 
                 if frame_index % INFER_EVERY == 0:
                     detections = detector.detect(frame)
+                if frame_index % POSE_INFER_EVERY == 0:
+                    pose_detections = pose_detector.detect(frame)
 
                 height, width = frame.shape[:2]
                 heat_status = (
@@ -323,6 +328,7 @@ class AnalysisService:
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
                     heat_exposure_tracker=self._heat_exposure_tracker,
+                    pose_detections=pose_detections,
                 )
 
                 encoded, jpeg = cv2.imencode(
@@ -383,6 +389,7 @@ class AnalysisService:
             rate_frames = 0
             processing_fps = 0.0
             detections = []
+            pose_detections = []
 
             while not self._stop_event.is_set():
                 now = time.monotonic()
@@ -409,6 +416,9 @@ class AnalysisService:
 
                 if frame_index % INFER_EVERY == 0:
                     detections = detector.detect(frame)
+                if frame_index % POSE_INFER_EVERY == 0:
+                    pose_detections = pose_detector.detect(frame)
+
                 height, width = frame.shape[:2]
                 heat_status = (
                     self._heat_service.get_status()
@@ -427,6 +437,7 @@ class AnalysisService:
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
                     heat_exposure_tracker=self._heat_exposure_tracker,
+                    pose_detections=pose_detections,
                 )
 
                 encoded, output_jpeg = cv2.imencode(

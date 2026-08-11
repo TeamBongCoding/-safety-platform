@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from ..config import FONT_PATH
+from ..config import DEBUG_POSE, FONT_PATH, POSE_KEYPOINT_CONF
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ _ROW_HELMET_NO = {"fg": (120, 140, 255), "bg": (25,  10,  35)}
 _ROW_ZONE      = {"fg": (160, 160, 160), "bg": (25,  25,  25)}
 _ROW_HEAT      = {"fg": (255, 185, 50),  "bg": (55,  25,   0)}
 _ROW_HEAT_NO   = {"fg": (100, 100, 100), "bg": (22,  22,  22)}
+_ROW_BEHAVIOR_WARN  = {"fg": (255, 180, 50),  "bg": (55,  30,   0)}
+_ROW_BEHAVIOR_ALERT = {"fg": (255,  60, 60),  "bg": (60,   0,   0)}
 
 _PAD_X  = 4   # 좌우 여백
 _PAD_Y  = 2   # 상하 여백
@@ -57,6 +59,8 @@ def draw_status(
     local_track_id,
     in_heat_zone=False,
     heat_seconds=0.0,
+    behavior_state=None,
+    behavior_debug=None,
 ):
     x1, y1, x2, y2 = map(int, box)
     box_w = max(x2 - x1, 1)
@@ -86,6 +90,21 @@ def draw_status(
         rows.append((f"폭염 연속 {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
     else:
         rows.append(("폭염구역 아님", FONT_SM, _ROW_HEAT_NO))
+
+    # 이상행동 감지 배지 (NORMAL 이 아닐 때만)
+    if behavior_state is not None and behavior_state.value != "NORMAL":
+        from .pose_behavior_detector import BEHAVIOR_LABELS, BehaviorState
+        label = BEHAVIOR_LABELS.get(behavior_state, behavior_state.value)
+        is_severe = behavior_state in (BehaviorState.FALL, BehaviorState.FALL_STILL)
+        style = _ROW_BEHAVIOR_ALERT if is_severe else _ROW_BEHAVIOR_WARN
+        rows.append((f"[행동] {label}", FONT_MD, style))
+
+    # DEBUG_POSE: 진단 정보 추가 행
+    if DEBUG_POSE and behavior_debug:
+        ratio = behavior_debug.get("bbox_ratio")
+        angle = behavior_debug.get("body_angle")
+        debug_txt = f"R:{ratio:.2f} A:{angle:.0f}" if angle is not None else f"R:{ratio:.2f}"
+        rows.append((debug_txt, FONT_SM, _ROW_ID))
 
     # ── 박스 내부 좌상단에 행 렌더링 ─────────────────────────────
     tx = x1 + 3
@@ -117,6 +136,25 @@ def draw_status(
         ty += row_h + _GAP
 
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGBA2BGR)
+
+
+def draw_pose_skeleton(frame, pose_detections: list) -> np.ndarray:
+    """DEBUG_POSE=True 일 때 keypoint 와 skeleton 을 영상에 그린다."""
+    if not DEBUG_POSE or not pose_detections:
+        return frame
+    from .pose_detector import SKELETON_PAIRS
+    for _bbox, kps in pose_detections:
+        # skeleton lines
+        for i, j in SKELETON_PAIRS:
+            if kps[i, 2] >= POSE_KEYPOINT_CONF and kps[j, 2] >= POSE_KEYPOINT_CONF:
+                pt1 = (int(kps[i, 0]), int(kps[i, 1]))
+                pt2 = (int(kps[j, 0]), int(kps[j, 1]))
+                cv2.line(frame, pt1, pt2, (0, 230, 180), 1)
+        # keypoint dots
+        for k in range(kps.shape[0]):
+            if kps[k, 2] >= POSE_KEYPOINT_CONF:
+                cv2.circle(frame, (int(kps[k, 0]), int(kps[k, 1])), 3, (255, 220, 0), -1)
+    return frame
 
 
 def draw_zones(frame, zones, w, h):

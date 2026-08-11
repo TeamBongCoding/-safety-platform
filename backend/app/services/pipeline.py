@@ -1,9 +1,15 @@
-"""Detection, tracking, cross-camera Re-ID, zones and helmet status pipeline."""
+"""Detection, tracking, cross-camera Re-ID, zones, helmet, and pose behavior pipeline."""
 
 import logging
 from .brightness import estimate_sun_shade, frame_avg_brightness
 from .helmet_logic import match_helmet_to_person
-from .overlay import draw_status
+from .overlay import draw_pose_skeleton, draw_status
+from .pose_behavior_detector import (
+    BEHAVIOR_EVENT_TYPES_PLAIN,
+    BehaviorState,
+    pose_behavior_detector,
+)
+from .pose_detector import match_pose_to_box
 from .safety_rules import ZONE_TYPES, evaluate, locate
 
 _log = logging.getLogger(__name__)
@@ -21,6 +27,7 @@ def process_frame(
     is_outdoor=False,
     heat_status=None,
     heat_exposure_tracker=None,
+    pose_detections=None,
 ):
     persons = [d for d in detections if d["cls"] == "person"]
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
@@ -79,8 +86,27 @@ def process_frame(
         heat_seconds = 0.0
         if heat_exposure_tracker is not None and heat_level != "inactive":
             heat_seconds = heat_exposure_tracker.update(
-                track.global_person_id, in_heat=rest_needed, now=_now
+                track.global_person_id, in_heat=rest_needed, now=_now,
+                camera_id=tracker.camera_id,
             )
+        # 크로스카메라 OR 판정 반영: 다른 카메라가 양지 판정했으면 heat_seconds > 0
+        effective_in_heat = rest_needed or heat_seconds > 0
+
+        # ── Pose 이상행동 감지 ────────────────────────────────────────────
+        behavior_result = None
+        if pose_detections:
+            pose_features = match_pose_to_box(track.box, pose_detections)
+            if pose_features is not None:
+                behavior_result = pose_behavior_detector.update(
+                    tracker.camera_id,
+                    track.local_track_id,
+                    pose_features,
+                    track.box,
+                    _now,
+                )
+
+        behavior_state = behavior_result.state if behavior_result else BehaviorState.NORMAL
+        behavior_debug = behavior_result.debug if behavior_result else None
 
         frame = draw_status(
             frame,
@@ -90,9 +116,32 @@ def process_frame(
             level,
             track.global_person_id,
             track.local_track_id,
-            in_heat_zone=rest_needed,
+            in_heat_zone=effective_in_heat,
             heat_seconds=heat_seconds,
+            behavior_state=behavior_state,
+            behavior_debug=behavior_debug,
         )
+
+        # 이상행동 이벤트 생성 (항상 발생, 폭염 여부에 따라 event_type 달라짐)
+        heatwave_active = heat_level in ("caution", "warning", "severe")
+        if (
+            behavior_result is not None
+            and behavior_result.state != BehaviorState.NORMAL
+        ):
+            etype = (
+                behavior_result.event_type  # heat_ 접두사 버전
+                if heatwave_active
+                else BEHAVIOR_EVENT_TYPES_PLAIN.get(behavior_result.state)
+            )
+            if etype and pose_behavior_detector.should_emit_event(
+                tracker.camera_id, track.local_track_id, behavior_result.state, _now
+            ):
+                events.append({
+                    "type": etype,
+                    "zone_id": None,
+                    "track_id": track.global_person_id,
+                    "confidence": behavior_result.confidence,
+                })
 
         worker = {
             "id": track.global_person_id,
@@ -110,8 +159,11 @@ def process_frame(
                 track.match_details is None and track.entry_grace_remaining > 0
             ),
             "shade_status": shade,
-            "rest_needed": rest_needed,
+            "rest_needed": effective_in_heat,
             "in_overlap_zone": track.in_overlap_zone,
+            "behavior_state": behavior_state.value,
+            "behavior_label": behavior_result.label if behavior_result else "정상",
+            "behavior_risk_score": behavior_result.risk_score if behavior_result else 0,
         }
         workers.append(worker)
 
@@ -122,6 +174,10 @@ def process_frame(
                 "worker_id": track.global_person_id,
                 "confidence": track.confidence,
             })
+
+    # DEBUG_POSE: 스켈레톤 오버레이 (운영 모드에서는 skip)
+    if pose_detections:
+        frame = draw_pose_skeleton(frame, pose_detections)
 
     if include_status:
         unique_person_count = len({w["global_person_id"] for w in workers})

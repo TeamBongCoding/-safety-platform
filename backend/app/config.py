@@ -72,6 +72,24 @@ EMBEDDING_HISTORY_SIZE = int(os.getenv("EMBEDDING_HISTORY_SIZE", "8"))
 EMBEDDING_MIN_QUALITY = float(os.getenv("EMBEDDING_MIN_QUALITY", "0.30"))
 # 헬멧 상태 크로스카메라 집계
 HELMET_VOTE_WINDOW_SECONDS = float(os.getenv("HELMET_VOTE_WINDOW_SECONDS", "5.0"))
+# ── Pose 행동 감지 ────────────────────────────────────────────────
+POSE_ENABLED = os.getenv("POSE_ENABLED", "0") == "1"
+POSE_MODEL_PATH = os.getenv("POSE_MODEL_PATH", "weights/yolo11n-pose.pt")
+DEBUG_POSE = os.getenv("DEBUG_POSE", "0") == "1"
+POSE_KEYPOINT_CONF = float(os.getenv("POSE_KEYPOINT_CONF", "0.4"))
+POSE_INFER_EVERY = int(os.getenv("POSE_INFER_EVERY", "2"))
+FALL_BBOX_RATIO = float(os.getenv("FALL_BBOX_RATIO", "1.2"))
+FALL_BODY_ANGLE = float(os.getenv("FALL_BODY_ANGLE", "40.0"))
+FALL_DURATION_SEC = float(os.getenv("FALL_DURATION_SEC", "1.0"))
+STILL_DURATION_SEC = float(os.getenv("STILL_DURATION_SEC", "5.0"))
+STILL_MOVEMENT_THRESHOLD = float(os.getenv("STILL_MOVEMENT_THRESHOLD", "0.03"))
+SUDDEN_SIT_DROP_RATIO = float(os.getenv("SUDDEN_SIT_DROP_RATIO", "0.15"))
+SUDDEN_SIT_WINDOW_SEC = float(os.getenv("SUDDEN_SIT_WINDOW_SEC", "1.0"))
+STAGGER_WINDOW_SEC = float(os.getenv("STAGGER_WINDOW_SEC", "3.0"))
+STAGGER_DIRECTION_CHANGES = int(os.getenv("STAGGER_DIRECTION_CHANGES", "4"))
+HEAT_BEHAVIOR_COOLDOWN_SEC = float(os.getenv("HEAT_BEHAVIOR_COOLDOWN_SEC", "15.0"))
+# ──────────────────────────────────────────────────────────────────
+
 REID_DEVICE = os.getenv("REID_DEVICE", "auto").lower()
 _fastreid_weights = Path(os.getenv(
     "FASTREID_WEIGHTS_PATH",
