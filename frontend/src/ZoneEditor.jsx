@@ -344,15 +344,18 @@ export default function ZoneEditor({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-950/40 px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button type="button" onClick={setGlobalVisibility} className={`rounded-md border px-2.5 py-1.5 ${overlayVisible ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>
+      <div className="flex flex-nowrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-950/40 px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 flex-nowrap items-center gap-2 text-xs">
+          <button type="button" onClick={setGlobalVisibility} className={`min-h-9 shrink-0 whitespace-nowrap rounded-md border px-2 py-1.5 sm:min-h-10 sm:px-2.5 ${overlayVisible ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>
             구역 표시 {overlayVisible ? '켜짐' : '꺼짐'}
           </button>
-          <span className="text-slate-500">저장 구역 {zones.length}개 · {cameraId ? `카메라 #${cameraId}` : '기본 영상'}</span>
-          {loading && <span className="text-slate-500">불러오는 중...</span>}
+          <span className="flex min-w-0 flex-1 flex-col text-center text-[10px] leading-tight text-slate-500 sm:flex-row sm:gap-1 sm:text-left sm:text-xs sm:leading-normal">
+            <span className="whitespace-nowrap">저장 구역 {zones.length}개</span>
+            <span className="whitespace-nowrap"><span className="hidden sm:inline">· </span>{cameraId ? `카메라 #${cameraId}` : '기본 영상'}</span>
+          </span>
+          {loading && <span className="hidden text-slate-500 sm:inline">불러오는 중...</span>}
         </div>
-        <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen} className="rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+        <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen} className="min-h-9 shrink-0 whitespace-nowrap rounded-md bg-cyan-500 px-2.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-10 sm:px-3">
           새 위험구역 설정
         </button>
       </div>
@@ -446,7 +449,7 @@ export default function ZoneEditor({
       )}
 
       {editorOpen && (
-        <div className="border-t border-slate-800 bg-slate-950/35 p-4">
+        <div className="border-t border-slate-800 bg-slate-950/35 p-3 sm:p-4">
           <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)]">
             <div className="space-y-3">
               <label className="block text-xs font-medium text-slate-300">
@@ -487,26 +490,26 @@ export default function ZoneEditor({
               </div>
 
               {phase === 'details' && (
-                <button type="button" onClick={beginDrawing} disabled={!form.name.trim()} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">그리기 시작</button>
+                <button type="button" onClick={beginDrawing} disabled={!form.name.trim()} className="min-h-11 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">그리기 시작</button>
               )}
 
               {(phase === 'drawing' || phase === 'editing') && (
                 <div className="flex flex-wrap gap-2">
                   {phase === 'editing' && (
                     <>
-                      <button type="button" onClick={() => setTool('vertices')} className={`rounded-lg border px-3 py-2 text-xs ${tool === 'vertices' ? 'border-cyan-400 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>점 수정</button>
-                      <button type="button" onClick={() => setTool('move')} className={`rounded-lg border px-3 py-2 text-xs ${tool === 'move' ? 'border-cyan-400 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>위치 이동</button>
+                      <button type="button" onClick={() => setTool('vertices')} className={`min-h-10 rounded-lg border px-3 py-2 text-xs ${tool === 'vertices' ? 'border-cyan-400 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>점 수정</button>
+                      <button type="button" onClick={() => setTool('move')} className={`min-h-10 rounded-lg border px-3 py-2 text-xs ${tool === 'move' ? 'border-cyan-400 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>위치 이동</button>
                     </>
                   )}
-                  <button type="button" onClick={undoPointChange} disabled={!history.length} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500 disabled:opacity-40">되돌리기</button>
-                  <button type="button" onClick={showPreview} disabled={points.length < 3} className="rounded-lg bg-violet-500 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-40">영역 닫기·미리보기</button>
+                  <button type="button" onClick={undoPointChange} disabled={!history.length} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500 disabled:opacity-40">되돌리기</button>
+                  <button type="button" onClick={showPreview} disabled={points.length < 3} className="min-h-10 rounded-lg bg-violet-500 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-40">영역 닫기·미리보기</button>
                 </div>
               )}
 
               {phase === 'preview' && (
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={continueEditing} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500">계속 수정</button>
-                  <button type="button" onClick={saveZone} disabled={saving || !form.name.trim()} className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-wait disabled:opacity-50">{saving ? '저장 중...' : '위험구역 저장'}</button>
+                  <button type="button" onClick={continueEditing} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500">계속 수정</button>
+                  <button type="button" onClick={saveZone} disabled={saving || !form.name.trim()} className="min-h-10 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-wait disabled:opacity-50">{saving ? '저장 중...' : '위험구역 저장'}</button>
                 </div>
               )}
 
@@ -516,7 +519,7 @@ export default function ZoneEditor({
         </div>
       )}
 
-      <div className="border-t border-slate-800 px-4 py-3">
+      <div className="border-t border-slate-800 px-3 py-3 sm:px-4">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-semibold text-slate-300">이 카메라의 위험구역</p>
           <button type="button" onClick={loadZones} className="text-xs text-slate-500 hover:text-cyan-300">새로고침</button>
@@ -538,9 +541,9 @@ export default function ZoneEditor({
                   <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${zone.visible ? 'bg-emerald-400' : 'bg-slate-600'}`} title={zone.visible ? '표시 중' : '숨김'} />
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => toggleZoneVisibility(zone)} className="rounded-md border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-cyan-500">{zone.visible ? '숨기기' : '표시하기'}</button>
-                  <button type="button" onClick={() => beginEdit(zone)} disabled={editorOpen} className="rounded-md border border-cyan-500/40 px-2.5 py-1 text-[11px] text-cyan-300 disabled:opacity-40">모양·정보 수정</button>
-                  <button type="button" onClick={() => deleteZone(zone)} className="rounded-md border border-red-500/30 px-2.5 py-1 text-[11px] text-red-300">삭제</button>
+                  <button type="button" onClick={() => toggleZoneVisibility(zone)} className="min-h-9 rounded-md border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-cyan-500">{zone.visible ? '숨기기' : '표시하기'}</button>
+                  <button type="button" onClick={() => beginEdit(zone)} disabled={editorOpen} className="min-h-9 rounded-md border border-cyan-500/40 px-2.5 py-1 text-[11px] text-cyan-300 disabled:opacity-40">모양·정보 수정</button>
+                  <button type="button" onClick={() => deleteZone(zone)} className="min-h-9 rounded-md border border-red-500/30 px-2.5 py-1 text-[11px] text-red-300">삭제</button>
                 </div>
               </article>
             ))}
