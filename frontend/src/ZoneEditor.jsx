@@ -22,9 +22,6 @@ const ZONE_TYPES = {
   no_entry: '출입금지',
   fall_risk: '추락위험',
   heavy_equip: '중장비 작업반경',
-  camera_entry: '카메라 입구 ROI',
-  camera_exit: '카메라 출구 ROI',
-  camera_overlap: '카메라 중복 시야',
 }
 
 const clamp = (value) => Math.min(1, Math.max(0, value))
@@ -608,7 +605,7 @@ export default function ZoneEditor({
                       <p className="truncate text-sm font-semibold text-white">{zone.name}</p>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] ${RISK_LEVELS[zone.risk_level]?.badge || RISK_LEVELS.high.badge}`}>{RISK_LEVELS[zone.risk_level]?.label || '높음'}</span>
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">{ZONE_TYPES[zone.zone_type]} · 점 {zone.polygon.length}개</p>
+                    <p className="mt-1 text-xs text-slate-500">{ZONE_TYPES[zone.zone_type] ?? zone.zone_type} · 점 {zone.polygon.length}개</p>
                     {zone.zone_type === 'camera_exit' && (() => {
                       const entry = zones.find((z) => z.id === zone.paired_zone_id)
                       return entry
