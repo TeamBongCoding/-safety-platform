@@ -9,6 +9,7 @@ import numpy as np
 
 from ..config import (
     MODEL_CONFIDENCE,
+    MODEL_IMAGE_SIZE,
     POSE_ENABLED,
     POSE_KEYPOINT_CONF,
     POSE_MODEL_PATH,
@@ -142,7 +143,12 @@ class PoseDetector:
             return []
         with self._lock:
             try:
-                results = self._model(frame, conf=MODEL_CONFIDENCE, verbose=False)[0]
+                results = self._model(
+                    frame,
+                    conf=MODEL_CONFIDENCE,
+                    imgsz=MODEL_IMAGE_SIZE,
+                    verbose=False,
+                )[0]
                 out = []
                 if results.keypoints is not None and results.boxes is not None:
                     kps_data = results.keypoints.data.cpu().numpy()

@@ -232,14 +232,12 @@ function Overview({ overview, users, onOpenUser }) {
   const cards = [
     ['전체 계정', overview.account_count, '개', 'cyan'],
     ['전체 현장', overview.site_count, '곳', 'violet'],
-    ['등록 작업자', overview.worker_count, '명', 'emerald'],
-    ['등록 카메라', overview.camera_count, '대', 'blue'],
     ['금일 위험', overview.events_today, '건', 'amber'],
     ['미조치 위험', overview.unresolved_count, '건', 'red'],
   ]
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(([label, value, unit, tone]) => <AdminMetric key={label} label={label} value={value} unit={unit} tone={tone} />)}
       </section>
 
@@ -335,8 +333,6 @@ function UserDetail({ user, currentAdminId, onClose, onChangeStatus, onDelete })
 
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <DetailMetric label="현장" value={`${user.site_count}곳`} />
-          <DetailMetric label="작업자" value={`${user.worker_count}명`} />
-          <DetailMetric label="카메라" value={`${user.camera_count}대`} />
           <DetailMetric label="위험 기록" value={`${user.event_count}건`} />
         </div>
 
@@ -355,7 +351,7 @@ function UserDetail({ user, currentAdminId, onClose, onChangeStatus, onDelete })
           {user.sites.length ? user.sites.map((site) => (
             <div key={site.id} className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 last:border-0 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="font-medium text-white">{site.name}</p><p className="mt-1 text-xs text-slate-500">현장 ID {site.id}</p></div>
-              <p className="text-xs text-slate-400">작업자 {site.worker_count} · 카메라 {site.camera_count} · 구역 {site.zone_count} · 기록 {site.event_count}</p>
+              <p className="text-xs text-slate-400">구역 {site.zone_count} · 기록 {site.event_count}</p>
             </div>
           )) : <p className="px-5 py-8 text-center text-sm text-slate-500">등록된 현장이 없습니다.</p>}
         </section>
@@ -377,7 +373,7 @@ function UserDetail({ user, currentAdminId, onClose, onChangeStatus, onDelete })
         {showDelete && (
           <form onSubmit={submitDelete} className="mt-5 rounded-xl border border-red-500/40 bg-red-500/10 p-5">
             <h3 className="font-semibold text-red-200">계정을 영구 삭제하시겠습니까?</h3>
-            <p className="mt-2 text-sm leading-6 text-red-200/80">현장 {user.site_count}곳, 작업자 {user.worker_count}명, 카메라 {user.camera_count}대, 위험 기록 {user.event_count}건이 함께 삭제되며 복구할 수 없습니다.</p>
+            <p className="mt-2 text-sm leading-6 text-red-200/80">현장 {user.site_count}곳과 위험 기록 {user.event_count}건이 함께 삭제되며 복구할 수 없습니다.</p>
             <label className="mt-4 block text-sm text-red-100">확인을 위해 <strong>{user.email}</strong>을 입력하세요.
               <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="mt-2 w-full rounded-lg border border-red-500/40 bg-slate-950 px-3 py-2 text-white outline-none focus:border-red-400" />
             </label>
@@ -468,7 +464,9 @@ function AdminLoading() {
 
 function formatDate(value) {
   if (!value) return '-'
+  const timestamp = !value.endsWith('Z') && !value.includes('+') ? `${value}+09:00` : value
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
     year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(value))
+  }).format(new Date(timestamp))
 }

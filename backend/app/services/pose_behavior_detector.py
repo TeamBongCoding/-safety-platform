@@ -1,6 +1,6 @@
 """State-machine based heat behavior detection from YOLO Pose keypoints.
 
-Per-(camera_id, local_track_id) history and state machine.
+Per-track history and state machine for a single camera stream.
 Detects: fall, stillness after fall, sudden sit, staggering.
 """
 from __future__ import annotations
@@ -93,8 +93,13 @@ class BehaviorResult:
     risk_score: int = 0
     confidence: float = 0.0
     label: str = "정상"
-    event_type: Optional[str] = None
     debug: dict = field(default_factory=dict)
+
+
+def behavior_event_type(state: BehaviorState, in_heat_zone: bool) -> str | None:
+    """Map behavior to a heat event only for a worker currently in a heat zone."""
+    event_types = BEHAVIOR_EVENT_TYPES if in_heat_zone else BEHAVIOR_EVENT_TYPES_PLAIN
+    return event_types.get(state)
 
 
 class _TrackHistory:
@@ -234,7 +239,6 @@ class _TrackHistory:
             risk_score=BEHAVIOR_RISK_SCORES[state],
             confidence=_STATE_CONFIDENCE[state],
             label=BEHAVIOR_LABELS[state],
-            event_type=BEHAVIOR_EVENT_TYPES.get(state),
             debug={
                 "bbox_ratio": round(pf.bbox_ratio, 2),
                 "body_angle": round(pf.body_angle, 1) if pf.body_angle is not None else None,
@@ -245,7 +249,7 @@ class _TrackHistory:
 
 
 class PoseBehaviorDetector:
-    """Manages per-(camera_id, local_track_id) behavior tracking and event cooldowns."""
+    """Manage per-track behavior history and event cooldowns."""
 
     _CLEANUP_INTERVAL = 60.0
     _TRACK_TIMEOUT = 30.0
@@ -269,7 +273,6 @@ class PoseBehaviorDetector:
 
     def update(
         self,
-        camera_id,
         local_track_id: int,
         pose_features: dict,
         bbox: list[float],
@@ -308,27 +311,32 @@ class PoseBehaviorDetector:
             bbox_ratio=bw / bh,
         )
 
-        key = (camera_id, local_track_id)
+        key = local_track_id
         if key not in self._tracks:
             self._tracks[key] = _TrackHistory()
         return self._tracks[key].update(pf)
 
     def should_emit_event(
         self,
-        camera_id,
         local_track_id: int,
         state: BehaviorState,
         now: float,
     ) -> bool:
         """Returns True if the event cooldown has passed for this track+state."""
-        key = (camera_id, local_track_id, state.value)
+        key = (local_track_id, state.value)
         if now - self._event_cooldowns.get(key, 0.0) >= HEAT_BEHAVIOR_COOLDOWN_SEC:
             self._event_cooldowns[key] = now
             return True
         return False
 
-    def remove_track(self, camera_id, local_track_id: int):
-        self._tracks.pop((camera_id, local_track_id), None)
+    def remove_track(self, local_track_id: int):
+        self._tracks.pop(local_track_id, None)
+
+    def reset(self):
+        """Clear histories when the single camera stream is replaced."""
+        self._tracks.clear()
+        self._event_cooldowns.clear()
+        self._last_cleanup = 0.0
 
 
 pose_behavior_detector = PoseBehaviorDetector()

@@ -50,7 +50,7 @@ export default function RankingDashboard({ onBack, currentCompany }) {
             <p className="text-xs font-semibold tracking-[0.22em] text-emerald-400">DAILY SAFETY RANKING</p>
             <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">오늘의 안전 순위</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-              오늘 발생한 경고가 적은 순서입니다. 경고 수가 같으면 공동 순위로 표시됩니다.
+              오늘 위험구역 내부에서 발생한 안전모 미착용 경고가 적은 순서입니다. 경고 수가 같으면 공동 순위로 표시됩니다.
             </p>
             {rankings?.date && <p className="mt-3 text-xs text-slate-500">집계일 {formatDate(rankings.date)}</p>}
           </div>
@@ -73,11 +73,9 @@ export default function RankingDashboard({ onBack, currentCompany }) {
         ))}
       </nav>
 
-      {rankingType === 'zones' && (
-        <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-200/80">
-          구역별 순위는 위험구역이 지정된 경고만 집계합니다. 안전모 미착용처럼 구역이 없는 경고는 회사·현장 순위에만 반영됩니다.
-        </p>
-      )}
+      <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-200/80">
+        모든 순위는 위험구역 내부의 안전모 미착용 경고만 집계하며, 경고가 적을수록 높은 순위입니다.
+      </p>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
         {error ? (

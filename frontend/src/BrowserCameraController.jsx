@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { WS_URL } from './api'
 
-const FRAME_INTERVAL_MS = 100
-const MAX_BUFFERED_BYTES = 500_000
+const FRAME_INTERVAL_MS = 80
+const MAX_BUFFERED_BYTES = 300_000
+const UPLOAD_WIDTH = 512
 
 function cameraUploadWsUrl() {
   return WS_URL.replace(/\/ws\/?$/, '') + '/ws/camera-upload'
@@ -98,7 +99,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
 
       const sw = video.videoWidth || 640
       const sh = video.videoHeight || 480
-      const tw = Math.min(sw, 640)
+      const tw = Math.min(sw, UPLOAD_WIDTH)
       const th = Math.round(sh * (tw / sw))
       if (canvas.width !== tw || canvas.height !== th) { canvas.width = tw; canvas.height = th }
       ctx.save()
@@ -111,7 +112,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
         if (!blob || socket.readyState !== WebSocket.OPEN) return
         socket.send(blob)
         frameCounterRef.current += 1
-      }, 'image/jpeg', 0.7)
+      }, 'image/jpeg', 0.68)
     }, FRAME_INTERVAL_MS)
 
     statsTimerRef.current = window.setInterval(() => {
@@ -140,7 +141,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
         video.loop = true
       } else {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
           audio: false,
         })
         streamRef.current = stream

@@ -23,23 +23,16 @@ def migrate_legacy_schema(engine) -> None:
             ("latitude", "ALTER TABLE sites ADD COLUMN latitude FLOAT"),
             ("longitude", "ALTER TABLE sites ADD COLUMN longitude FLOAT"),
         ],
-        "cameras": [
-            ("is_outdoor", "ALTER TABLE cameras ADD COLUMN is_outdoor BOOLEAN NOT NULL DEFAULT 0"),
-        ],
         "zones": [
             ("site_id", "ALTER TABLE zones ADD COLUMN site_id INTEGER REFERENCES sites(id)"),
-            ("camera_id", "ALTER TABLE zones ADD COLUMN camera_id INTEGER REFERENCES cameras(id)"),
             ("risk_level", "ALTER TABLE zones ADD COLUMN risk_level VARCHAR(20) NOT NULL DEFAULT 'high'"),
             ("description", "ALTER TABLE zones ADD COLUMN description TEXT NOT NULL DEFAULT ''"),
             ("precautions", "ALTER TABLE zones ADD COLUMN precautions TEXT NOT NULL DEFAULT ''"),
             ("visible", "ALTER TABLE zones ADD COLUMN visible BOOLEAN NOT NULL DEFAULT 1"),
             ("updated_at", "ALTER TABLE zones ADD COLUMN updated_at DATETIME"),
-            ("paired_zone_id", "ALTER TABLE zones ADD COLUMN paired_zone_id INTEGER REFERENCES zones(id)"),
         ],
         "events": [
             ("site_id", "ALTER TABLE events ADD COLUMN site_id INTEGER REFERENCES sites(id)"),
-            ("camera_id", "ALTER TABLE events ADD COLUMN camera_id INTEGER REFERENCES cameras(id)"),
-            ("worker_id", "ALTER TABLE events ADD COLUMN worker_id INTEGER REFERENCES workers(id)"),
             ("track_id", "ALTER TABLE events ADD COLUMN track_id VARCHAR(50)"),
         ],
     }
@@ -56,9 +49,6 @@ def migrate_legacy_schema(engine) -> None:
         if "zones" in table_names:
             connection.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_zones_site_id ON zones (site_id)"
-            )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_zones_site_camera_id ON zones (site_id, camera_id)"
             )
         if "events" in table_names:
             connection.exec_driver_sql(

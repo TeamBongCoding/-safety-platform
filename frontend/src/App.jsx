@@ -14,6 +14,11 @@ const levelStyles = {
 const eventLabels = {
   no_helmet: '안전모 미착용',
   zone_intrusion: '위험구역 침입',
+  zone_approach: '출입금지구역 접근',
+  fall_risk_entry: '추락위험 구역 진입',
+  fall_risk_approach: '추락위험 구역 접근',
+  heavy_equipment_entry: '중장비 작업반경 진입',
+  heavy_equipment_approach: '중장비 작업반경 접근',
   stagger: '휘청거림 감지',
   sudden_sit: '주저앉음 감지',
   fall: '쓰러짐 감지',
@@ -170,6 +175,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
   const [showCamSettings, setShowCamSettings] = useState(false)
   const [cameraStreaming, setCameraStreaming] = useState(false)
   const [confirmDeleteSite, setConfirmDeleteSite] = useState(false)
+  const [deleteSiteId, setDeleteSiteId] = useState('')
   const [sunThreshold, setSunThreshold] = useState(1.15)
   const [shadeThreshold, setShadeThreshold] = useState(0.85)
   const [cautionTemp, setCautionTemp] = useState(31.0)
@@ -337,17 +343,21 @@ function Dashboard({ session, setSession, onShowRanking }) {
   }
 
   const deleteSite = async () => {
-    if (!currentSite) return
+    const targetId = Number(deleteSiteId)
+    const targetSite = session.sites.find((site) => site.id === targetId)
+    if (!targetSite) return
     try {
-      const nextSession = await api(`/api/sites/${currentSite.id}`, { method: 'DELETE' })
+      const nextSession = await api(`/api/sites/${targetId}`, { method: 'DELETE' })
       setSummary(null)
       setEvents([])
       setStreamReady(false)
       setConfirmDeleteSite(false)
+      setDeleteSiteId('')
       setSession(nextSession)
-      setNotice(`'${currentSite.name}' 현장을 삭제했습니다.`)
+      setNotice(`'${targetSite.name}' 현장을 삭제했습니다.`)
     } catch (error) {
       setConfirmDeleteSite(false)
+      setDeleteSiteId('')
       handleUnauthorized(error)
     }
   }
@@ -379,6 +389,49 @@ function Dashboard({ session, setSession, onShowRanking }) {
     return '분석 중지됨'
   }, [connected, summary])
 
+  if (!currentSite) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#07111f] px-4 py-10 text-slate-100">
+        <section className="w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-black/30">
+          <p className="text-xs font-semibold tracking-[0.22em] text-cyan-400">SITE SAFETY OPERATIONS</p>
+          <h1 className="mt-2 text-2xl font-bold text-white">관리할 현장을 등록하세요</h1>
+          <p className="mt-2 text-sm text-slate-400">현재 계정에 남아 있는 현장이 없습니다. 새 현장을 만들면 관제 화면이 바로 시작됩니다.</p>
+          <form onSubmit={createSite} className="mt-6 grid gap-3 sm:grid-cols-2">
+            <input
+              value={newSiteName}
+              onChange={(event) => setNewSiteName(event.target.value)}
+              placeholder="새 현장명"
+              maxLength="100"
+              autoFocus
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500 sm:col-span-2"
+            />
+            <input
+              value={newSiteLat}
+              onChange={(event) => setNewSiteLat(event.target.value)}
+              placeholder="위도 (선택)"
+              type="number"
+              step="any"
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+            />
+            <input
+              value={newSiteLon}
+              onChange={(event) => setNewSiteLon(event.target.value)}
+              placeholder="경도 (선택)"
+              type="number"
+              step="any"
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+            />
+            <button disabled={!newSiteName.trim()} className="rounded-lg bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-40 sm:col-span-2">
+              새 현장 만들기
+            </button>
+          </form>
+          {notice && <p className="mt-3 text-sm text-red-300">{notice}</p>}
+          <button onClick={logout} className="mt-5 text-sm text-slate-500 hover:text-red-300">로그아웃</button>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
@@ -401,15 +454,25 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
               </select>
               <button onClick={() => setAddingSite((value) => !value)} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
-              {session.sites.length > 1 && (
+              {currentSite && (
                 confirmDeleteSite ? (
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-xs text-red-400">'{currentSite?.name}' 삭제?</span>
-                    <button onClick={deleteSite} className="rounded-lg border border-red-500/60 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/25">확인</button>
-                    <button onClick={() => setConfirmDeleteSite(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:text-slate-200">취소</button>
+                  <span className="flex flex-wrap items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/5 p-1.5">
+                    <label className="sr-only" htmlFor="delete-site-select">삭제할 현장</label>
+                    <select
+                      id="delete-site-select"
+                      value={deleteSiteId}
+                      onChange={(event) => setDeleteSiteId(event.target.value)}
+                      className="rounded-md border border-red-500/40 bg-slate-950 px-2.5 py-1.5 text-sm text-red-200 outline-none focus:border-red-400"
+                    >
+                      <option value="">삭제할 현장 선택</option>
+                      {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+                    </select>
+                    <button disabled={!deleteSiteId} onClick={deleteSite} className="rounded-lg border border-red-500/60 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/25 disabled:opacity-40">선택 현장 삭제</button>
+                    <button onClick={() => { setConfirmDeleteSite(false); setDeleteSiteId('') }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:text-slate-200">취소</button>
+                    {session.sites.length === 1 && <span className="px-1 text-xs text-red-400">마지막 현장 삭제 후 새 현장을 등록해야 합니다.</span>}
                   </span>
                 ) : (
-                  <button onClick={() => setConfirmDeleteSite(true)} className="rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-400/70 hover:border-red-500/60 hover:text-red-300">현장 삭제</button>
+                  <button onClick={() => { setDeleteSiteId(String(currentSite.id)); setConfirmDeleteSite(true) }} className="rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-400/70 hover:border-red-500/60 hover:text-red-300">현장 삭제</button>
                 )
               )}
               <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
@@ -543,7 +606,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
               <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '브라우저 카메라 실시간 분석' : '녹화 영상 분석'}</span>
-              <span>{summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · {summary?.processing_fps ?? 0} FPS</span>
+              <span>단일 카메라 추적 · {summary?.processing_fps ?? 0} FPS</span>
             </div>
           </div>
 
@@ -659,7 +722,7 @@ function WorkerCard({ worker }) {
   return (
     <article className={`rounded-xl border p-4 ${style}`}>
       <div className="mb-3 flex items-center justify-between">
-        <span className="font-semibold text-white">Global ID · {worker.global_person_id ?? worker.id}</span>
+        <span className="font-semibold text-white">추적 ID · {worker.track_id ?? worker.id}</span>
         <div className="flex items-center gap-1.5">
           {worker.shade_status === 'sun' && (
             <span className="rounded-full bg-orange-500/20 px-2 py-0.5 text-[10px] font-bold text-orange-300">양지</span>
@@ -671,16 +734,19 @@ function WorkerCard({ worker }) {
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <StatusPill label="안전모" ok={worker.helmet_on} />
-        <span className="rounded-md bg-slate-950/30 px-2 py-1.5 text-slate-300">카메라 내부 ID · {worker.local_track_id}</span>
+        <HelmetPill state={worker.helmet_on} violation={worker.helmet_violation} />
       </div>
       <p className="mt-3 text-xs text-slate-400">위치 · {worker.zone}</p>
       <p className="mt-1 text-xs text-slate-400">객체 품질 · {Math.round((worker.image_quality ?? 0) * 100)}%</p>
-      {worker.rest_needed && (
-        <p className="mt-2 rounded-md bg-orange-500/15 px-2 py-1.5 text-xs font-semibold text-orange-300">
-          휴식 권고 — 야외 양지, 폭염 위험
+      {worker.strong_rest_needed ? (
+        <p className="mt-2 rounded-md bg-red-500/20 px-2 py-1.5 text-xs font-bold text-red-300">
+          강력 휴식 권고 — 폭염구역 누적 20초 이상
         </p>
-      )}
+      ) : worker.rest_needed ? (
+        <p className="mt-2 rounded-md bg-orange-500/15 px-2 py-1.5 text-xs font-semibold text-orange-300">
+          휴식 권고 — 폭염구역 누적 10초 이상
+        </p>
+      ) : null}
       {worker.reasons?.length > 0 && <p className="mt-1 text-xs font-medium">{worker.reasons.join(' · ')}</p>}
       {worker.behavior_state && worker.behavior_state !== 'NORMAL' && (
         <p className={`mt-2 rounded-md px-2 py-1.5 text-xs font-semibold ${behaviorStyles[worker.behavior_state] ?? 'bg-slate-700/30 text-slate-300'}`}>
@@ -700,6 +766,7 @@ function HeatSection({
 }) {
   const meta = heatLevelMeta[heatStatus.level]
   const restCount = workers.filter((w) => w.rest_needed).length
+  const strongRestCount = workers.filter((w) => w.strong_rest_needed).length
   const inactive = !meta
 
   const borderBg = inactive
@@ -738,7 +805,9 @@ function HeatSection({
               <span className="ml-2 text-sm font-normal text-slate-500">체감온도</span>
             </p>
             {restCount > 0 && (
-              <p className="mt-1 text-xs text-orange-300">휴식 권고 작업자 {restCount}명 (양지·폭염)</p>
+              <p className="mt-1 text-xs text-orange-300">
+                휴식 권고 {restCount}명{strongRestCount > 0 ? ` · 강력 권고 ${strongRestCount}명` : ''}
+              </p>
             )}
             <p className="mt-1 text-xs text-slate-600">
               * 본 정보는 위험 추정 보조 자료이며 건강 데이터를 저장하지 않습니다.
@@ -856,6 +925,13 @@ function HeatSection({
 
 function StatusPill({ label, ok }) {
   return <span className={`rounded-md px-2 py-1.5 ${ok ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>{label} {ok ? '정상' : '미확인'}</span>
+}
+
+function HelmetPill({ state, violation }) {
+  if (state === true) return <StatusPill label="안전모" ok />
+  if (state === false && violation) return <span className="rounded-md bg-red-500/15 px-2 py-1.5 text-red-300">안전모 미착용</span>
+  if (state === false) return <span className="rounded-md bg-slate-700/40 px-2 py-1.5 text-slate-300">안전모 미착용 · 일반구역 허용</span>
+  return <span className="rounded-md bg-slate-700/40 px-2 py-1.5 text-slate-400">안전모 판정 불가</span>
 }
 
 function EmptyState({ text }) {

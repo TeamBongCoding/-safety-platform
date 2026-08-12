@@ -1,4 +1,4 @@
-from datetime import date, datetime, time as datetime_time, timedelta
+from datetime import datetime, time as datetime_time, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import and_, func, select
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_user
 from ..database import get_db
 from ..models import Event, Site, User, Zone
+from ..time_utils import kst_now, kst_today
 
 
 router = APIRouter(prefix="/api/rankings", tags=["rankings"])
@@ -30,12 +31,14 @@ def today_rankings(
     _user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    today = date.today()
+    today = kst_today()
     start_of_day = datetime.combine(today, datetime_time.min)
     end_of_day = start_of_day + timedelta(days=1)
-    event_today = and_(
+    helmet_warning_today = and_(
         Event.timestamp >= start_of_day,
         Event.timestamp < end_of_day,
+        Event.event_type == "no_helmet",
+        Event.zone_id.is_not(None),
     )
 
     company_count = func.count(Event.id).label("warning_count")
@@ -47,7 +50,7 @@ def today_rankings(
         )
         .select_from(User)
         .outerjoin(Site, Site.user_id == User.id)
-        .outerjoin(Event, and_(Event.site_id == Site.id, event_today))
+        .outerjoin(Event, and_(Event.site_id == Site.id, helmet_warning_today))
         .where(User.role == "user", User.status == "active")
         .group_by(User.company_name)
         .order_by(company_count.asc(), User.company_name.asc())
@@ -71,7 +74,7 @@ def today_rankings(
         )
         .select_from(Site)
         .join(User, Site.user_id == User.id)
-        .outerjoin(Event, and_(Event.site_id == Site.id, event_today))
+        .outerjoin(Event, and_(Event.site_id == Site.id, helmet_warning_today))
         .where(User.role == "user", User.status == "active")
         .group_by(Site.id, Site.name, User.company_name)
         .order_by(site_count.asc(), User.company_name.asc(), Site.name.asc())
@@ -99,7 +102,7 @@ def today_rankings(
         .select_from(Zone)
         .join(Site, Zone.site_id == Site.id)
         .join(User, Site.user_id == User.id)
-        .outerjoin(Event, and_(Event.zone_id == Zone.id, event_today))
+        .outerjoin(Event, and_(Event.zone_id == Zone.id, helmet_warning_today))
         .where(User.role == "user", User.status == "active")
         .group_by(Zone.id, Zone.name, Site.id, Site.name, User.company_name)
         .order_by(
@@ -123,7 +126,7 @@ def today_rankings(
 
     return {
         "date": today.isoformat(),
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": kst_now().isoformat(),
         "companies": companies,
         "sites": sites,
         "zones": zones,

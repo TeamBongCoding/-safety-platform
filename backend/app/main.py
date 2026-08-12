@@ -1,4 +1,5 @@
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -11,7 +12,7 @@ from .config import CORS_ORIGINS, KMA_API_KEY, PROJECT_ROOT, SESSION_COOKIE_NAME
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Site
-from .routers import admin, analysis, auth, events, heat, rankings, resources, sites, zones
+from .routers import admin, analysis, auth, events, heat, rankings, sites, zones
 from .services.analysis_service import analysis_registry
 from .services.heat_service import heat_registry
 
@@ -39,7 +40,6 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(sites.router)
-app.include_router(resources.router)
 app.include_router(events.router)
 app.include_router(rankings.router)
 app.include_router(zones.router)
@@ -77,7 +77,7 @@ async def ws_camera_upload(ws: WebSocket):
 
     heat_svc = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
     # 기존 파일 기반 서비스를 중지하고 외부 카메라 서비스로 전환
-    analysis_registry.stop_camera(site_id, None)
+    analysis_registry.stop_site(site_id)
     service = analysis_registry.get(site_id, source="browser", is_outdoor=is_outdoor, heat_service=heat_svc)
 
     await ws.accept()
@@ -85,18 +85,38 @@ async def ws_camera_upload(ws: WebSocket):
         await ws.close(code=4409, reason="이미 다른 카메라가 연결되어 있습니다.")
         return
 
+    last_auth_check = time.monotonic()
     try:
         while True:
             data = await ws.receive_bytes()
+            if len(data) > 1_500_000:
+                await ws.close(code=1009, reason="카메라 프레임이 너무 큽니다.")
+                return
+            now = time.monotonic()
+            if now - last_auth_check >= 5:
+                with SessionLocal() as db:
+                    current_user = user_from_token(session_token, db)
+                    if not current_user or current_user.current_site_id != site_id:
+                        await ws.close(code=4401, reason="세션 또는 현재 현장이 변경되었습니다.")
+                        return
+                last_auth_check = now
             service.submit_jpeg(data)
     except WebSocketDisconnect:
         pass
     finally:
         service.detach_external_camera()
-        # 브라우저 카메라 종료 후 파일 기반 분석으로 복귀
-        analysis_registry.stop_camera(site_id, None)
-        heat_svc2 = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
-        analysis_registry.get(site_id, is_outdoor=is_outdoor, heat_service=heat_svc2)
+        analysis_registry.stop_site(site_id)
+        # 현장이 여전히 존재하고 현재 선택된 경우에만 파일 기반 분석으로 복귀한다.
+        with SessionLocal() as db:
+            current_user = user_from_token(session_token, db)
+            site_still_active = bool(
+                current_user
+                and current_user.current_site_id == site_id
+                and db.scalar(select(Site.id).where(Site.id == site_id))
+            )
+        if site_still_active:
+            heat_svc2 = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
+            analysis_registry.get(site_id, is_outdoor=is_outdoor, heat_service=heat_svc2)
 
 
 @app.websocket("/ws")
@@ -134,7 +154,8 @@ async def ws_endpoint(ws: WebSocket):
     try:
         while True:
             with SessionLocal() as db:
-                if not user_from_token(session_token, db):
+                current_user = user_from_token(session_token, db)
+                if not current_user or current_user.current_site_id != site_id:
                     await ws.close(code=4401, reason="세션이 만료되었거나 계정이 정지되었습니다.")
                     return
             service = analysis_registry.current(site_id)

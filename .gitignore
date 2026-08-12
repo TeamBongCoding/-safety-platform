@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+.ipynb_checkpoints/
 
 # Node
 node_modules/

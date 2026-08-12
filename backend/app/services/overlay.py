@@ -37,6 +37,7 @@ LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 25
 _ROW_ID        = {"fg": (210, 210, 210), "bg": (20,  20,  20)}
 _ROW_HELMET_OK = {"fg": (90,  220, 90),  "bg": (10,  40,  10)}
 _ROW_HELMET_NO = {"fg": (120, 140, 255), "bg": (25,  10,  35)}
+_ROW_HELMET_UNKNOWN = {"fg": (170, 170, 170), "bg": (30, 30, 30)}
 _ROW_ZONE      = {"fg": (160, 160, 160), "bg": (25,  25,  25)}
 _ROW_HEAT      = {"fg": (255, 185, 50),  "bg": (55,  25,   0)}
 _ROW_HEAT_NO   = {"fg": (100, 100, 100), "bg": (22,  22,  22)}
@@ -55,11 +56,12 @@ def draw_status(
     helmet_on,
     zone_label,
     level,
-    global_person_id,
-    local_track_id,
+    track_id,
     in_heat_zone=False,
     heat_seconds=0.0,
+    helmet_violation=False,
     behavior_state=None,
+    behavior_heat_related=False,
     behavior_debug=None,
 ):
     x1, y1, x2, y2 = map(int, box)
@@ -77,17 +79,24 @@ def draw_status(
     d = ImageDraw.Draw(img, "RGBA")
 
     # ── 행 정의 ──────────────────────────────────────────────────
-    short_id = global_person_id.replace("person-", "")
+    short_id = track_id.replace("person-", "")
+    if helmet_on is True:
+        helmet_text, helmet_style = "안전모 착용", _ROW_HELMET_OK
+    elif helmet_on is False and helmet_violation:
+        helmet_text, helmet_style = "안전모 미착용", _ROW_HELMET_NO
+    elif helmet_on is False:
+        helmet_text, helmet_style = "안전모 미착용 (허용)", _ROW_HELMET_OK
+    else:
+        helmet_text, helmet_style = "안전모 판정 불가", _ROW_HELMET_UNKNOWN
     rows = [
-        (f"G·{short_id} L·{local_track_id}", FONT_SM, _ROW_ID),
-        ("안전모 착용" if helmet_on else "안전모 미착용", FONT_MD,
-         _ROW_HELMET_OK if helmet_on else _ROW_HELMET_NO),
+        (f"작업자 #{short_id}", FONT_SM, _ROW_ID),
+        (helmet_text, FONT_MD, helmet_style),
     ]
     if zone_label:
         rows.append((f"구역 {zone_label}", FONT_SM, _ROW_ZONE))
     if in_heat_zone:
         m, s = divmod(int(heat_seconds), 60)
-        rows.append((f"폭염 연속 {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
+        rows.append((f"폭염 누적 {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
     else:
         rows.append(("폭염구역 아님", FONT_SM, _ROW_HEAT_NO))
 
@@ -95,6 +104,8 @@ def draw_status(
     if behavior_state is not None and behavior_state.value != "NORMAL":
         from .pose_behavior_detector import BEHAVIOR_LABELS, BehaviorState
         label = BEHAVIOR_LABELS.get(behavior_state, behavior_state.value)
+        if behavior_heat_related:
+            label = f"폭염 {label}"
         is_severe = behavior_state in (BehaviorState.FALL, BehaviorState.FALL_STILL)
         style = _ROW_BEHAVIOR_ALERT if is_severe else _ROW_BEHAVIOR_WARN
         rows.append((f"[행동] {label}", FONT_MD, style))

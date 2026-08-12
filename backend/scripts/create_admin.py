@@ -1,5 +1,12 @@
 """서버 터미널에서만 실행하는 최초 관리자 생성 도구."""
 import getpass
+import sys
+from pathlib import Path
+
+# `python scripts/create_admin.py`로 실행해도 backend/app을 찾을 수 있게 한다.
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from sqlalchemy import select
 

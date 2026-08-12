@@ -1,4 +1,4 @@
-"""Offline test-video analysis with tracking, Re-ID descriptors and zones.
+"""Offline test-video analysis with local tracking and safety zones.
 
 Run from backend: python -m scripts.analyze_video2 ../data/videos/site1.mp4
 """
@@ -13,7 +13,7 @@ sys.path.insert(0, ".")
 from app.database import SessionLocal
 from app.models import Zone
 from app.services.detector import detector
-from app.services.person_tracking import CameraPersonTracker, GlobalIdentityManager
+from app.services.person_tracking import CameraPersonTracker
 from app.services.pipeline import process_frame
 
 INFER_EVERY = 3
@@ -36,8 +36,7 @@ def load_zones():
 
 def main(video_path, out_path="output2.mp4"):
     zones = load_zones()
-    identity_manager = GlobalIdentityManager()
-    tracker = CameraPersonTracker(camera_id=1, identity_manager=identity_manager)
+    tracker = CameraPersonTracker()
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("영상을 열 수 없습니다:", video_path)
@@ -66,7 +65,6 @@ def main(video_path, out_path="output2.mp4"):
             width,
             height,
             tracker,
-            identity_manager,
             include_status=True,
         )
         for event in events:

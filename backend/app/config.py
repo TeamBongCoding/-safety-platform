@@ -48,6 +48,7 @@ CORS_ORIGINS = _csv(
 HELMET_MODEL_PATH = os.getenv("HELMET_MODEL_PATH", "weights/best.pt")
 PERSON_MODEL_PATH = os.getenv("PERSON_MODEL_PATH", "yolov8n.pt")
 MODEL_CONFIDENCE = float(os.getenv("MODEL_CONFIDENCE", "0.4"))
+MODEL_IMAGE_SIZE = int(os.getenv("MODEL_IMAGE_SIZE", "512"))
 _default_font_path = (
     "C:/Windows/Fonts/malgun.ttf"
     if os.name == "nt"
@@ -55,29 +56,14 @@ _default_font_path = (
 )
 FONT_PATH = os.getenv("FONT_PATH", _default_font_path)
 TRACK_MAX_MISSED_FRAMES = int(os.getenv("TRACK_MAX_MISSED_FRAMES", "12"))
-REID_MAX_TRANSITION_SECONDS = float(os.getenv("REID_MAX_TRANSITION_SECONDS", "30"))
-REID_MIN_SIMILARITY = float(os.getenv("REID_MIN_SIMILARITY", "0.60"))
-REID_SCORE_THRESHOLD = float(os.getenv("REID_SCORE_THRESHOLD", "0.68"))
-REID_DEEP_WEIGHT = float(os.getenv("REID_DEEP_WEIGHT", "0.85"))
-REID_IMAGE_SIZE = int(os.getenv("REID_IMAGE_SIZE", "192"))
-REID_ENTRY_GRACE_FRAMES = int(os.getenv("REID_ENTRY_GRACE_FRAMES", "30"))
-REID_ROI_MARGIN = float(os.getenv("REID_ROI_MARGIN", "0.025"))
-REID_BACKEND = os.getenv("REID_BACKEND", "fastreid").lower()
-# 중복 시야(overlap) 실시간 매칭 관련
-REID_OVERLAP_THRESHOLD = float(os.getenv("REID_OVERLAP_THRESHOLD", "0.80"))
-REID_STRONG_MATCH_THRESHOLD = float(os.getenv("REID_STRONG_MATCH_THRESHOLD", "0.82"))
-OVERLAP_TIME_TOLERANCE = float(os.getenv("OVERLAP_TIME_TOLERANCE", "2.0"))
-# 멀티프레임 embedding 안정화
-EMBEDDING_HISTORY_SIZE = int(os.getenv("EMBEDDING_HISTORY_SIZE", "8"))
-EMBEDDING_MIN_QUALITY = float(os.getenv("EMBEDDING_MIN_QUALITY", "0.30"))
-# 헬멧 상태 크로스카메라 집계
-HELMET_VOTE_WINDOW_SECONDS = float(os.getenv("HELMET_VOTE_WINDOW_SECONDS", "5.0"))
 # ── Pose 행동 감지 ────────────────────────────────────────────────
 POSE_ENABLED = os.getenv("POSE_ENABLED", "0") == "1"
 POSE_MODEL_PATH = os.getenv("POSE_MODEL_PATH", "weights/yolo11n-pose.pt")
 DEBUG_POSE = os.getenv("DEBUG_POSE", "0") == "1"
 POSE_KEYPOINT_CONF = float(os.getenv("POSE_KEYPOINT_CONF", "0.4"))
 POSE_INFER_EVERY = int(os.getenv("POSE_INFER_EVERY", "2"))
+LIVE_INFER_EVERY = int(os.getenv("LIVE_INFER_EVERY", "4"))
+LIVE_POSE_INFER_EVERY = int(os.getenv("LIVE_POSE_INFER_EVERY", "6"))
 FALL_BBOX_RATIO = float(os.getenv("FALL_BBOX_RATIO", "1.2"))
 FALL_BODY_ANGLE = float(os.getenv("FALL_BODY_ANGLE", "40.0"))
 FALL_DURATION_SEC = float(os.getenv("FALL_DURATION_SEC", "1.0"))
@@ -89,14 +75,3 @@ STAGGER_WINDOW_SEC = float(os.getenv("STAGGER_WINDOW_SEC", "3.0"))
 STAGGER_DIRECTION_CHANGES = int(os.getenv("STAGGER_DIRECTION_CHANGES", "4"))
 HEAT_BEHAVIOR_COOLDOWN_SEC = float(os.getenv("HEAT_BEHAVIOR_COOLDOWN_SEC", "15.0"))
 # ──────────────────────────────────────────────────────────────────
-
-REID_DEVICE = os.getenv("REID_DEVICE", "auto").lower()
-_fastreid_weights = Path(os.getenv(
-    "FASTREID_WEIGHTS_PATH",
-    str(PROJECT_ROOT / "backend" / "weights" / "market_bot_R50.pth"),
-))
-FASTREID_WEIGHTS_PATH = str(
-    _fastreid_weights
-    if _fastreid_weights.is_absolute()
-    else (PROJECT_ROOT / _fastreid_weights).resolve()
-)

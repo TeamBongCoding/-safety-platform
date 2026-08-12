@@ -280,5 +280,11 @@ class HeatRegistry:
                 svc.stop()
             self._services.clear()
 
+    def stop_site(self, site_id: int):
+        with self._lock:
+            service = self._services.pop(site_id, None)
+        if service is not None:
+            service.stop()
+
 
 heat_registry = HeatRegistry()

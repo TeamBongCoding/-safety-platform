@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 import traceback
-from datetime import date, datetime, time as datetime_time
+from datetime import datetime, time as datetime_time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,18 @@ import numpy as np
 from shapely.geometry import Polygon
 from sqlalchemy import func, select
 
-from ..config import ANALYSIS_ENABLED, POSE_INFER_EVERY, PROJECT_ROOT, VIDEO_SOURCE
+from ..config import (
+    ANALYSIS_ENABLED,
+    LIVE_INFER_EVERY,
+    LIVE_POSE_INFER_EVERY,
+    POSE_INFER_EVERY,
+    PROJECT_ROOT,
+    VIDEO_SOURCE,
+)
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
-from .person_tracking import CameraPersonTracker, GlobalIdentityManager, HeatExposureTracker
+from ..time_utils import kst_now, kst_today
+from .person_tracking import CameraPersonTracker, HeatExposureTracker
 from .pose_detector import pose_detector
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
@@ -27,30 +35,35 @@ EVENT_COOLDOWN_SECONDS = 10
 ZONE_REFRESH_SECONDS = 1
 
 
+def should_persist_event(event: dict) -> bool:
+    """Apply the product's event-log policy without hiding live UI warnings."""
+    if event.get("type") in {"stagger", "heat_stagger"}:
+        return False
+    if event.get("type") == "no_helmet" and not event.get("in_risk_zone", False):
+        return False
+    return True
+
+
 class AnalysisService:
     def __init__(
         self,
         site_id: int,
-        identity_manager: GlobalIdentityManager,
-        camera_id: int | None = None,
         external: bool = False,
         is_outdoor: bool = False,
         heat_service=None,
-        heat_exposure_tracker: HeatExposureTracker | None = None,
     ):
         self.site_id = site_id
-        self.camera_id = camera_id
         self.external = external
         self.is_outdoor = is_outdoor
         self._heat_service = heat_service
-        self._heat_exposure_tracker = heat_exposure_tracker
-        self.identity_manager = identity_manager
-        self.person_tracker = CameraPersonTracker(camera_id, identity_manager)
+        self._heat_exposure_tracker = HeatExposureTracker()
+        self.person_tracker = CameraPersonTracker()
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._frame_ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._latest_jpeg: bytes | None = None
+        self._latest_original_jpeg: bytes | None = None
         self._pending_jpeg: bytes | None = None
         self._external_connected = False
         self._frame_version = 0
@@ -66,11 +79,6 @@ class AnalysisService:
             "worker_count": 0,
             "unique_person_count": 0,
             "no_helmet_count": 0,
-            "transition_candidate_count": 0,
-            "entry_roi_count": 0,
-            "exit_roi_count": 0,
-            "overlap_roi_count": 0,
-            "reid_backend": None,
             "workers": [],
             "last_error": None,
         }
@@ -112,7 +120,7 @@ class AnalysisService:
         )
         self._thread = threading.Thread(
             target=self._run_external,
-            name=f"browser-camera-analysis-{self.camera_id}",
+            name=f"browser-camera-analysis-{self.site_id}",
             daemon=True,
         )
         self._thread.start()
@@ -124,10 +132,10 @@ class AnalysisService:
                 return False
             self._external_connected = True
             self._latest_jpeg = None
+            self._latest_original_jpeg = None
             self._status.update({
                 "worker_count": 0,
                 "no_helmet_count": 0,
-                "transition_candidate_count": 0,
                 "workers": [],
             })
         self._set_status(
@@ -139,12 +147,15 @@ class AnalysisService:
         return True
 
     def detach_external_camera(self):
-        exit_zones = [zone for zone in self._zones if zone["zone_type"] == "camera_exit"]
-        self.person_tracker.flush(exit_zones)
+        from .pose_behavior_detector import pose_behavior_detector
+
+        self.person_tracker.flush()
+        pose_behavior_detector.reset()
         with self._lock:
             self._external_connected = False
             self._pending_jpeg = None
             self._latest_jpeg = None
+            self._latest_original_jpeg = None
         self._set_status(
             running=False,
             stage="camera_disconnected",
@@ -157,15 +168,23 @@ class AnalysisService:
         self._frame_ready.set()
 
     def stop(self):
+        from .pose_behavior_detector import pose_behavior_detector
+
         self._stop_event.set()
         self._frame_ready.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
+        self.person_tracker.flush()
+        pose_behavior_detector.reset()
         self._set_status(running=False, stage="stopped", message="분석이 중지되었습니다.")
 
     def get_frame(self):
         with self._lock:
             return self._latest_jpeg, self._frame_version
+
+    def get_original_frame(self):
+        with self._lock:
+            return self._latest_original_jpeg, self._frame_version
 
     def get_status(self):
         with self._lock:
@@ -175,7 +194,7 @@ class AnalysisService:
 
     def get_summary(self):
         snapshot = self.get_status()
-        start_of_day = datetime.combine(date.today(), datetime_time.min)
+        start_of_day = datetime.combine(kst_today(), datetime_time.min)
         with SessionLocal() as db:
             violations_today = db.scalar(
                 select(func.count(Event.id)).where(
@@ -186,15 +205,10 @@ class AnalysisService:
 
         return {
             "type": "summary",
-            "camera_id": self.camera_id,
             "source": snapshot["source"],
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": kst_now().isoformat(),
             "worker_count": snapshot["worker_count"],
             "no_helmet_count": snapshot["no_helmet_count"],
-            "transition_candidate_count": snapshot["transition_candidate_count"],
-            "entry_roi_count": snapshot["entry_roi_count"],
-            "exit_roi_count": snapshot["exit_roi_count"],
-            "reid_backend": snapshot["reid_backend"],
             "violations_today": violations_today,
             "analysis_running": snapshot["running"],
             "analysis_stage": snapshot["stage"],
@@ -212,13 +226,11 @@ class AnalysisService:
     def _load_zones(self):
         zones = []
         with SessionLocal() as db:
-            camera_filter = (
-                Zone.camera_id == self.camera_id
-                if self.camera_id is not None
-                else Zone.camera_id.is_(None)
-            )
             for zone in db.scalars(
-                select(Zone).where(Zone.site_id == self.site_id, camera_filter)
+                select(Zone).where(
+                    Zone.site_id == self.site_id,
+                    Zone.zone_type.in_(("no_entry", "fall_risk", "heavy_equip", "work_area")),
+                )
             ).all():
                 polygon = json.loads(zone.polygon)
                 zones.append({
@@ -237,18 +249,17 @@ class AnalysisService:
         now = time.monotonic()
         new_events = []
 
-        _SKIP_TYPES = {"stagger", "heat_stagger"}
         for event in events:
-            if event["type"] in _SKIP_TYPES:
+            if not should_persist_event(event):
                 continue
-            key = (event["type"], event.get("zone_id"))
+            # 같은 위험이라도 작업자가 다르면 별도 사건으로 기록한다.
+            key = (event["type"], event.get("zone_id"), event.get("track_id"))
             last_seen = self._event_last_seen.get(key, 0.0)
             if now - last_seen < EVENT_COOLDOWN_SECONDS:
                 continue
             self._event_last_seen[key] = now
             new_events.append(Event(
                 site_id=self.site_id,
-                camera_id=self.camera_id,
                 event_type=event["type"],
                 zone_id=event.get("zone_id"),
                 track_id=event.get("track_id"),
@@ -313,6 +324,11 @@ class AnalysisService:
                 if frame_index % POSE_INFER_EVERY == 0:
                     pose_detections = pose_detector.detect(frame)
 
+                original_encoded, original_jpeg = cv2.imencode(
+                    ".jpg",
+                    frame,
+                    [cv2.IMWRITE_JPEG_QUALITY, 82],
+                )
                 height, width = frame.shape[:2]
                 heat_status = (
                     self._heat_service.get_status()
@@ -326,7 +342,6 @@ class AnalysisService:
                     width,
                     height,
                     self.person_tracker,
-                    self.identity_manager,
                     include_status=True,
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
@@ -342,6 +357,8 @@ class AnalysisService:
                 if encoded:
                     with self._lock:
                         self._latest_jpeg = jpeg.tobytes()
+                        if original_encoded:
+                            self._latest_original_jpeg = original_jpeg.tobytes()
                         self._frame_version += 1
 
                 self._save_events(events)
@@ -417,9 +434,11 @@ class AnalysisService:
                 if frame is None:
                     continue
 
-                if frame_index % INFER_EVERY == 0:
+                original_jpeg = jpeg_bytes
+
+                if frame_index % max(1, LIVE_INFER_EVERY) == 0:
                     detections = detector.detect(frame)
-                if frame_index % POSE_INFER_EVERY == 0:
+                if frame_index % max(1, LIVE_POSE_INFER_EVERY) == 0:
                     pose_detections = pose_detector.detect(frame)
 
                 height, width = frame.shape[:2]
@@ -435,7 +454,6 @@ class AnalysisService:
                     width,
                     height,
                     self.person_tracker,
-                    self.identity_manager,
                     include_status=True,
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
@@ -451,6 +469,7 @@ class AnalysisService:
                 if encoded:
                     with self._lock:
                         self._latest_jpeg = output_jpeg.tobytes()
+                        self._latest_original_jpeg = original_jpeg
                         self._frame_version += 1
 
                 self._save_events(events)
@@ -485,39 +504,26 @@ class AnalysisService:
 class AnalysisRegistry:
     def __init__(self):
         self._lock = threading.Lock()
-        self._services: dict[tuple[int, int | None], AnalysisService] = {}
-        self._identity_managers: dict[int, GlobalIdentityManager] = {}
-        self._heat_exposure_trackers: dict[int, HeatExposureTracker] = {}
+        self._services: dict[int, AnalysisService] = {}
 
     def get(
         self,
         site_id: int,
-        camera_id: int | None = None,
         source: str | None = None,
         is_outdoor: bool = False,
         heat_service=None,
     ) -> AnalysisService:
-        key = (site_id, camera_id)
         external = source == "browser"
         with self._lock:
-            service = self._services.get(key)
+            service = self._services.get(site_id)
             if service is None:
-                identity_manager = self._identity_managers.setdefault(
-                    site_id, GlobalIdentityManager()
-                )
-                heat_exposure_tracker = self._heat_exposure_trackers.setdefault(
-                    site_id, HeatExposureTracker()
-                )
                 service = AnalysisService(
                     site_id,
-                    identity_manager,
-                    camera_id=camera_id,
                     external=external,
                     is_outdoor=is_outdoor,
                     heat_service=heat_service,
-                    heat_exposure_tracker=heat_exposure_tracker,
                 )
-                self._services[key] = service
+                self._services[site_id] = service
             elif heat_service is not None and service._heat_service is None:
                 service._heat_service = heat_service
         if external:
@@ -526,14 +532,13 @@ class AnalysisRegistry:
             service.start(source)
         return service
 
-    def current(self, site_id: int, camera_id: int | None = None) -> "AnalysisService | None":
+    def current(self, site_id: int) -> "AnalysisService | None":
         with self._lock:
-            return self._services.get((site_id, camera_id))
+            return self._services.get(site_id)
 
-    def stop_camera(self, site_id: int, camera_id: int | None):
-        key = (site_id, camera_id)
+    def stop_site(self, site_id: int):
         with self._lock:
-            service = self._services.pop(key, None)
+            service = self._services.pop(site_id, None)
         if service:
             service.stop()
 

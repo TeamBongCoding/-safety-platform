@@ -4,7 +4,9 @@ import math
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from pydantic import field_validator
+from pydantic import field_serializer, field_validator
+
+from .time_utils import kst_isoformat
 
 
 class SignupRequest(BaseModel):
@@ -73,49 +75,18 @@ class AdminDeleteRequest(BaseModel):
     email: str
 
 
-class WorkerCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=50)
-    external_id: str | None = Field(default=None, max_length=100)
-
-
-class WorkerOut(WorkerCreate):
-    id: int
-    active: bool
-
-    class Config:
-        from_attributes = True
-
-
-class CameraCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    source: str | None = Field(default=None, max_length=500)
-    is_outdoor: bool = False
-
-
-class CameraOut(CameraCreate):
-    id: int
-    active: bool
-
-    class Config:
-        from_attributes = True
-
-
 class ZoneCreate(BaseModel):
     name: str = Field(min_length=1, max_length=50)
     zone_type: Literal[
         "no_entry",
         "fall_risk",
         "heavy_equip",
-        "camera_entry",
-        "camera_exit",
-        "camera_overlap",
+        "work_area",
     ] = "no_entry"
     risk_level: Literal["low", "medium", "high", "critical"] = "high"
     description: str = Field(default="", max_length=1000)
     precautions: str = Field(default="", max_length=1000)
     visible: bool = True
-    camera_id: int | None = None
-    paired_zone_id: int | None = None
     polygon: list[list[float]] = Field(min_length=3, max_length=50)
 
     @field_validator("name")
@@ -161,6 +132,10 @@ class EventOut(BaseModel):
     snapshot_path: str | None
     confidence: float
     resolved: bool
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, value: datetime) -> str:
+        return kst_isoformat(value)
 
     class Config:
         from_attributes = True

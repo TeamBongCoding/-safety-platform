@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, time as datetime_time, timedelta
+from datetime import datetime, time as datetime_time, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,15 +10,14 @@ from ..auth import require_platform_admin
 from ..database import get_db
 from ..models import (
     AdminAuditLog,
-    Camera,
     Event,
     LoginSession,
     Site,
     User,
-    Worker,
     Zone,
 )
 from ..schemas import AdminDeleteRequest
+from ..time_utils import kst_isoformat, kst_today
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -60,12 +59,6 @@ def user_summary(user: User, db: Session) -> dict:
         "last_login_at": user.last_login_at,
         "suspended_at": user.suspended_at,
         "site_count": len(site_ids),
-        "worker_count": db.scalar(
-            select(func.count(Worker.id)).where(Worker.site_id.in_(site_ids))
-        ) or 0,
-        "camera_count": db.scalar(
-            select(func.count(Camera.id)).where(Camera.site_id.in_(site_ids))
-        ) or 0,
         "event_count": db.scalar(
             select(func.count(Event.id)).where(Event.site_id.in_(site_ids))
         ) or 0,
@@ -83,7 +76,7 @@ def overview(
     db: Session = Depends(get_db),
 ):
     del admin
-    start_of_day = datetime.combine(date.today(), datetime_time.min)
+    start_of_day = datetime.combine(kst_today(), datetime_time.min)
     return {
         "account_count": db.scalar(
             select(func.count(User.id)).where(User.role == "user")
@@ -94,8 +87,6 @@ def overview(
             )
         ) or 0,
         "site_count": db.scalar(select(func.count(Site.id))) or 0,
-        "worker_count": db.scalar(select(func.count(Worker.id))) or 0,
-        "camera_count": db.scalar(select(func.count(Camera.id))) or 0,
         "event_count": db.scalar(select(func.count(Event.id))) or 0,
         "events_today": db.scalar(
             select(func.count(Event.id)).where(Event.timestamp >= start_of_day)
@@ -146,12 +137,6 @@ def user_detail(
             "id": site.id,
             "name": site.name,
             "created_at": site.created_at,
-            "worker_count": db.scalar(
-                select(func.count(Worker.id)).where(Worker.site_id == site.id)
-            ) or 0,
-            "camera_count": db.scalar(
-                select(func.count(Camera.id)).where(Camera.site_id == site.id)
-            ) or 0,
             "zone_count": db.scalar(
                 select(func.count(Zone.id)).where(Zone.site_id == site.id)
             ) or 0,
@@ -223,8 +208,6 @@ def delete_user(
     db.execute(delete(LoginSession).where(LoginSession.user_id == target.id))
     db.execute(delete(Event).where(Event.site_id.in_(site_ids)))
     db.execute(delete(Zone).where(Zone.site_id.in_(site_ids)))
-    db.execute(delete(Worker).where(Worker.site_id.in_(site_ids)))
-    db.execute(delete(Camera).where(Camera.site_id.in_(site_ids)))
     db.execute(update(User).where(User.id == target.id).values(current_site_id=None))
     db.execute(delete(Site).where(Site.user_id == target.id))
     db.execute(delete(User).where(User.id == target.id))
@@ -248,7 +231,7 @@ def list_all_events(
     ).all()
     return [{
         "id": event.id,
-        "timestamp": event.timestamp,
+        "timestamp": kst_isoformat(event.timestamp),
         "event_type": event.event_type,
         "confidence": event.confidence,
         "resolved": event.resolved,
@@ -267,7 +250,7 @@ def delete_events(
 ):
     statement = delete(Event)
     if scope == "today":
-        start_of_day = datetime.combine(date.today(), datetime_time.min)
+        start_of_day = datetime.combine(kst_today(), datetime_time.min)
         statement = statement.where(
             Event.timestamp >= start_of_day,
             Event.timestamp < start_of_day + timedelta(days=1),

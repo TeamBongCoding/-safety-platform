@@ -8,7 +8,6 @@ const EMPTY_FORM = {
   description: '',
   precautions: '',
   visible: true,
-  paired_zone_id: null,
 }
 
 const RISK_LEVELS = {
@@ -22,10 +21,40 @@ const ZONE_TYPES = {
   no_entry: '출입금지',
   fall_risk: '추락위험',
   heavy_equip: '중장비 작업반경',
+  work_area: '작업구역',
 }
 
 const clamp = (value) => Math.min(1, Math.max(0, value))
 const svgPoints = (points) => points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')
+
+const RECORDING_FPS = 15
+
+function recordingMimeType() {
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
+  return candidates.find((value) => window.MediaRecorder?.isTypeSupported(value)) || ''
+}
+
+function recordingExtension(mimeType) {
+  return mimeType.includes('mp4') ? 'mp4' : 'webm'
+}
+
+function formatRecordingTime(seconds) {
+  const minutes = Math.floor(seconds / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+async function imageFromBlob(blob) {
+  if ('createImageBitmap' in window) return window.createImageBitmap(blob)
+  const url = URL.createObjectURL(blob)
+  try {
+    const image = new Image()
+    image.src = url
+    await image.decode()
+    return image
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
 
 function zoneCenter(points) {
   const total = points.reduce((result, [x, y]) => [result[0] + x, result[1] + y], [0, 0])
@@ -34,7 +63,6 @@ function zoneCenter(points) {
 
 export default function ZoneEditor({
   siteId,
-  cameraId,
   streamKey,
   streamSrc,
   streamAlt,
@@ -49,7 +77,9 @@ export default function ZoneEditor({
   const imageRef = useRef(null)
   const svgRef = useRef(null)
   const dragRef = useRef(null)
-  const visibilityKey = `safety_zone_overlay_${siteId}_${cameraId ?? 'default'}`
+  const recordingSessionRef = useRef(null)
+  const savedRecordingsRef = useRef([])
+  const visibilityKey = `safety_zone_overlay_${siteId}`
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -70,8 +100,11 @@ export default function ZoneEditor({
   const [history, setHistory] = useState([])
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
+  const [recording, setRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [savedRecordings, setSavedRecordings] = useState([])
 
-  const zonesUrl = cameraId ? `/api/zones?camera_id=${cameraId}` : '/api/zones'
+  const zonesUrl = '/api/zones'
 
   const loadZones = useCallback(async () => {
     try {
@@ -154,7 +187,9 @@ export default function ZoneEditor({
           onStreamError?.()
           return
         }
-      } catch {}
+      } catch {
+        // 프레임 전환 중의 일시적인 네트워크 오류는 다음 폴링에서 복구한다.
+      }
       if (active) setTimeout(poll, 50)
     }
 
@@ -164,6 +199,191 @@ export default function ZoneEditor({
       setTimeout(() => revoke(prevBlob), 500)
     }
   }, [streamSrc, onStreamError, onStreamLoad, updateDisplayRect])
+
+  useEffect(() => {
+    if (!recording) return undefined
+    const timer = window.setInterval(() => {
+      setRecordingSeconds((seconds) => seconds + 1)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [recording])
+
+  useEffect(() => () => {
+    const session = recordingSessionRef.current
+    if (session) {
+      session.discard = true
+      session.stopping = true
+      window.clearInterval(session.drawTimer)
+      window.clearTimeout(session.originalPollTimer)
+      session.recorders.forEach((recorder) => {
+        if (recorder.state !== 'inactive') recorder.stop()
+      })
+      session.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()))
+      session.originalFrame?.close?.()
+      if (session.overlayUrl) URL.revokeObjectURL(session.overlayUrl)
+    }
+    savedRecordingsRef.current.forEach((item) => URL.revokeObjectURL(item.url))
+  }, [])
+
+  const replaceSavedRecordings = (items) => {
+    savedRecordingsRef.current.forEach((item) => URL.revokeObjectURL(item.url))
+    savedRecordingsRef.current = items
+    setSavedRecordings(items)
+  }
+
+  const fetchOriginalFrame = async () => {
+    const originalUrl = streamSrc.replace('/stream', '/original-frame')
+    const response = await fetch(originalUrl, { credentials: 'include', cache: 'no-store' })
+    if (!response.ok) throw new Error('원본 프레임을 가져오지 못했습니다.')
+    return imageFromBlob(await response.blob())
+  }
+
+  const stopRecording = () => {
+    const session = recordingSessionRef.current
+    if (!session || session.stopping) return
+    session.stopping = true
+    window.clearInterval(session.drawTimer)
+    window.clearTimeout(session.originalPollTimer)
+    session.recorders.forEach((recorder) => {
+      if (recorder.state !== 'inactive') recorder.stop()
+    })
+    setRecording(false)
+  }
+
+  const startRecording = async () => {
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+      setNotice('이 브라우저는 영상 녹화를 지원하지 않습니다. 최신 Chrome 또는 Edge를 사용하세요.')
+      return
+    }
+    const analysisImage = imageRef.current
+    if (!streamReady || !analysisImage?.naturalWidth || !analysisImage?.naturalHeight) {
+      setNotice('분석 영상이 준비된 뒤 녹화를 시작하세요.')
+      return
+    }
+
+    replaceSavedRecordings([])
+    setNotice('원본 영상과 분석 영상을 녹화할 준비를 하고 있습니다.')
+
+    try {
+      const originalFrame = await fetchOriginalFrame()
+      const width = analysisImage.naturalWidth
+      const height = analysisImage.naturalHeight
+      const analysisCanvas = document.createElement('canvas')
+      const originalCanvas = document.createElement('canvas')
+      analysisCanvas.width = originalCanvas.width = width
+      analysisCanvas.height = originalCanvas.height = height
+      const analysisContext = analysisCanvas.getContext('2d')
+      const originalContext = originalCanvas.getContext('2d')
+
+      let overlayImage = null
+      let overlayUrl = null
+      if (overlayVisible && svgRef.current) {
+        const overlaySvg = svgRef.current.cloneNode(true)
+        overlaySvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        overlaySvg.setAttribute('width', String(width))
+        overlaySvg.setAttribute('height', String(height))
+        const svgBlob = new Blob(
+          [new XMLSerializer().serializeToString(overlaySvg)],
+          { type: 'image/svg+xml;charset=utf-8' },
+        )
+        overlayUrl = URL.createObjectURL(svgBlob)
+        overlayImage = new Image()
+        overlayImage.src = overlayUrl
+        await overlayImage.decode()
+      }
+
+      const mimeType = recordingMimeType()
+      const options = mimeType ? { mimeType, videoBitsPerSecond: 2_500_000 } : { videoBitsPerSecond: 2_500_000 }
+      const analysisStream = analysisCanvas.captureStream(RECORDING_FPS)
+      const originalStream = originalCanvas.captureStream(RECORDING_FPS)
+      const analysisRecorder = new MediaRecorder(analysisStream, options)
+      const originalRecorder = new MediaRecorder(originalStream, options)
+      const session = {
+        analysisChunks: [],
+        originalChunks: [],
+        recorders: [analysisRecorder, originalRecorder],
+        streams: [analysisStream, originalStream],
+        originalFrame,
+        overlayImage,
+        overlayUrl,
+        mimeType: analysisRecorder.mimeType || mimeType || 'video/webm',
+        stoppedCount: 0,
+        stopping: false,
+        discard: false,
+        drawTimer: null,
+        originalPollTimer: null,
+      }
+      recordingSessionRef.current = session
+
+      analysisRecorder.ondataavailable = (event) => {
+        if (event.data.size) session.analysisChunks.push(event.data)
+      }
+      originalRecorder.ondataavailable = (event) => {
+        if (event.data.size) session.originalChunks.push(event.data)
+      }
+      const finishOne = () => {
+        session.stoppedCount += 1
+        if (session.stoppedCount < 2) return
+        session.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()))
+        session.originalFrame?.close?.()
+        if (session.overlayUrl) URL.revokeObjectURL(session.overlayUrl)
+        if (!session.discard) {
+          const extension = recordingExtension(session.mimeType)
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+          const files = [
+            {
+              label: '원본 영상 저장',
+              name: `safety-site-${siteId}-${stamp}-original.${extension}`,
+              url: URL.createObjectURL(new Blob(session.originalChunks, { type: session.mimeType })),
+            },
+            {
+              label: '오버레이 영상 저장',
+              name: `safety-site-${siteId}-${stamp}-analysis.${extension}`,
+              url: URL.createObjectURL(new Blob(session.analysisChunks, { type: session.mimeType })),
+            },
+          ]
+          replaceSavedRecordings(files)
+          setNotice('녹화가 완료되었습니다. 원본 영상과 오버레이 영상을 각각 저장하세요.')
+        }
+        if (recordingSessionRef.current === session) recordingSessionRef.current = null
+      }
+      analysisRecorder.onstop = finishOne
+      originalRecorder.onstop = finishOne
+
+      const drawFrames = () => {
+        analysisContext.drawImage(analysisImage, 0, 0, width, height)
+        if (session.overlayImage) analysisContext.drawImage(session.overlayImage, 0, 0, width, height)
+        originalContext.drawImage(session.originalFrame, 0, 0, width, height)
+      }
+      drawFrames()
+      session.drawTimer = window.setInterval(drawFrames, 1000 / RECORDING_FPS)
+
+      const pollOriginal = async () => {
+        if (session.stopping) return
+        try {
+          const nextFrame = await fetchOriginalFrame()
+          if (session.stopping) {
+            nextFrame.close?.()
+            return
+          }
+          session.originalFrame?.close?.()
+          session.originalFrame = nextFrame
+        } catch {
+          // 마지막 정상 원본 프레임을 유지하고 다음 폴링에서 다시 시도한다.
+        }
+        session.originalPollTimer = window.setTimeout(pollOriginal, 80)
+      }
+
+      analysisRecorder.start(1000)
+      originalRecorder.start(1000)
+      pollOriginal()
+      setRecordingSeconds(0)
+      setRecording(true)
+      setNotice('원본 영상과 오버레이 영상을 동시에 녹화하고 있습니다.')
+    } catch (error) {
+      setNotice(error.message || '영상 녹화를 시작하지 못했습니다.')
+    }
+  }
 
   const handleImageLoad = () => {
     updateDisplayRect()
@@ -207,10 +427,6 @@ export default function ZoneEditor({
       setNotice('구역 이름을 먼저 입력하세요.')
       return
     }
-    if (form.zone_type === 'camera_exit' && !form.paired_zone_id) {
-      setNotice('출구 구역은 연결할 입구 구역을 먼저 선택하세요.')
-      return
-    }
     setPhase('drawing')
     setNotice('영상 위를 차례로 클릭하세요. 첫 점을 다시 누르거나 미리보기를 누르면 영역이 닫힙니다.')
   }
@@ -226,7 +442,6 @@ export default function ZoneEditor({
       description: zone.description,
       precautions: zone.precautions,
       visible: zone.visible,
-      paired_zone_id: zone.paired_zone_id ?? null,
     })
     setPoints(zone.polygon)
     setHistory([])
@@ -340,7 +555,6 @@ export default function ZoneEditor({
       name: form.name.trim(),
       description: form.description.trim(),
       precautions: form.precautions.trim(),
-      camera_id: cameraId,
       polygon: points.map(([x, y]) => [Number(x.toFixed(6)), Number(y.toFixed(6))]),
     }
     try {
@@ -376,20 +590,12 @@ export default function ZoneEditor({
   }
 
   const deleteZone = async (zone) => {
-    const pairedExit = zone.zone_type === 'camera_entry'
-      ? zones.find((z) => z.paired_zone_id === zone.id)
-      : null
-    const confirmMsg = pairedExit
-      ? `'${zone.name}' 입구 구역을 삭제하면 연결된 출구 구역 '${pairedExit.name}'도 함께 삭제됩니다. 계속할까요?`
-      : `'${zone.name}' 위험구역을 삭제할까요?`
-    if (!window.confirm(confirmMsg)) return
+    if (!window.confirm(`'${zone.name}' 위험구역을 삭제할까요?`)) return
     try {
       await api(`/api/zones/${zone.id}`, { method: 'DELETE' })
-      setZones((current) => current.filter((item) => item.id !== zone.id && item.id !== pairedExit?.id))
-      if (editingZoneId === zone.id || editingZoneId === pairedExit?.id) resetEditor()
-      setNotice(pairedExit
-        ? `'${zone.name}' 및 연결된 출구 구역 '${pairedExit.name}'을 삭제했습니다.`
-        : `'${zone.name}' 위험구역을 삭제했습니다.`)
+      setZones((current) => current.filter((item) => item.id !== zone.id))
+      if (editingZoneId === zone.id) resetEditor()
+      setNotice(`'${zone.name}' 위험구역을 삭제했습니다.`)
     } catch (error) {
       setNotice(error.message)
       onRequestError(error)
@@ -406,13 +612,35 @@ export default function ZoneEditor({
           <button type="button" onClick={setGlobalVisibility} className={`rounded-md border px-2.5 py-1.5 ${overlayVisible ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>
             구역 표시 {overlayVisible ? '켜짐' : '꺼짐'}
           </button>
-          <span className="text-slate-500">저장 구역 {zones.length}개 · {cameraId ? `카메라 #${cameraId}` : '기본 영상'}</span>
+          <span className="text-slate-500">저장 구역 {zones.length}개 · 단일 카메라</span>
           {loading && <span className="text-slate-500">불러오는 중...</span>}
         </div>
-        <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen} className="rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
-          새 위험구역 설정
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {recording ? (
+            <button type="button" onClick={stopRecording} className="rounded-md border border-red-400/60 bg-red-500/20 px-3 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/30">
+              ■ 녹화 종료 · {formatRecordingTime(recordingSeconds)}
+            </button>
+          ) : (
+            <button type="button" onClick={startRecording} disabled={!streamReady || editorOpen} className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+              ● 원본·오버레이 녹화
+            </button>
+          )}
+          <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen || recording} className="rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+            새 위험구역 설정
+          </button>
+        </div>
       </div>
+
+      {savedRecordings.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 text-xs">
+          <span className="font-semibold text-emerald-300">녹화 완료</span>
+          {savedRecordings.map((file) => (
+            <a key={file.name} href={file.url} download={file.name} className="rounded-md border border-emerald-500/40 px-3 py-1.5 font-semibold text-emerald-200 hover:bg-emerald-500/10">
+              {file.label}
+            </a>
+          ))}
+        </div>
+      )}
 
       <div ref={containerRef} className="relative aspect-video overflow-hidden bg-black">
         <img
@@ -512,7 +740,7 @@ export default function ZoneEditor({
               <div className="grid grid-cols-2 gap-2">
                 <label className="block text-xs font-medium text-slate-300">
                   위험 유형
-                  <select value={form.zone_type} onChange={(event) => setForm((current) => ({ ...current, zone_type: event.target.value, paired_zone_id: event.target.value === 'camera_exit' ? current.paired_zone_id : null }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
+                  <select value={form.zone_type} onChange={(event) => setForm((current) => ({ ...current, zone_type: event.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
                     {Object.entries(ZONE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
@@ -523,24 +751,6 @@ export default function ZoneEditor({
                   </select>
                 </label>
               </div>
-              {form.zone_type === 'camera_exit' && (() => {
-                const pairedEntryIds = new Set(
-                  zones.filter((z) => z.zone_type === 'camera_exit' && z.paired_zone_id != null && z.id !== editingZoneId).map((z) => z.paired_zone_id)
-                )
-                const availableEntries = zones.filter((z) => z.zone_type === 'camera_entry' && (!pairedEntryIds.has(z.id) || z.id === form.paired_zone_id))
-                return (
-                  <label className="block text-xs font-medium text-slate-300">
-                    연결 입구 구역 <span className="text-red-400">*</span>
-                    {availableEntries.length === 0
-                      ? <p className="mt-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">연결 가능한 입구 구역이 없습니다. 먼저 입구 구역을 생성하세요.</p>
-                      : <select value={form.paired_zone_id ?? ''} onChange={(event) => setForm((current) => ({ ...current, paired_zone_id: event.target.value ? Number(event.target.value) : null }))} className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500">
-                          <option value="">— 입구 구역 선택 —</option>
-                          {availableEntries.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-                        </select>
-                    }
-                  </label>
-                )
-              })()}
               <label className="block text-xs font-medium text-slate-300">
                 설명
                 <textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} maxLength="1000" rows="2" placeholder="이 구역의 위험 요소를 설명하세요." className="mt-1.5 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500" />
@@ -606,18 +816,6 @@ export default function ZoneEditor({
                       <span className={`rounded-full px-2 py-0.5 text-[10px] ${RISK_LEVELS[zone.risk_level]?.badge || RISK_LEVELS.high.badge}`}>{RISK_LEVELS[zone.risk_level]?.label || '높음'}</span>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">{ZONE_TYPES[zone.zone_type] ?? zone.zone_type} · 점 {zone.polygon.length}개</p>
-                    {zone.zone_type === 'camera_exit' && (() => {
-                      const entry = zones.find((z) => z.id === zone.paired_zone_id)
-                      return entry
-                        ? <p className="mt-1 text-xs text-cyan-400">↔ 입구: {entry.name}</p>
-                        : null
-                    })()}
-                    {zone.zone_type === 'camera_entry' && (() => {
-                      const exit = zones.find((z) => z.paired_zone_id === zone.id)
-                      return exit
-                        ? <p className="mt-1 text-xs text-cyan-400">↔ 출구: {exit.name}</p>
-                        : <p className="mt-1 text-xs text-slate-600">출구 미연결</p>
-                    })()}
                     {zone.description && <p className="mt-2 line-clamp-2 text-xs text-slate-400">{zone.description}</p>}
                     {zone.precautions && <p className="mt-1 line-clamp-2 text-xs text-amber-300">주의 · {zone.precautions}</p>}
                   </div>
