@@ -28,8 +28,8 @@ def _load_font(size: int = 14):
     return ImageFont.load_default()
 
 
-FONT_SM = _load_font(11)   # ID·보조 정보
-FONT_MD = _load_font(12)   # 상태 뱃지
+FONT_SM = _load_font(12)   # ID·보조 정보
+FONT_MD = _load_font(13)   # 상태 뱃지
 
 LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 255)}
 
@@ -106,34 +106,60 @@ def draw_status(
         debug_txt = f"R:{ratio:.2f} A:{angle:.0f}" if angle is not None else f"R:{ratio:.2f}"
         rows.append((debug_txt, FONT_SM, _ROW_ID))
 
-    # ── 박스 내부 좌상단에 행 렌더링 ─────────────────────────────
-    tx = x1 + 3
-    ty = y1 + 3
-    max_row_w = box_w - 6   # 박스 가로 여백
+    # ── 행 크기 사전 계산 → 패널 너비 결정 ──────────────────────
+    frame_h, frame_w = frame.shape[:2]
+    _PANEL_GAP = 6   # 박스와 패널 사이 간격
 
+    row_sizes = []
     for text, font, style in rows:
         tb = d.textbbox((0, 0), text, font=font)
-        tw, th = tb[2], tb[3]
-        row_w = min(tw + _PAD_X * 2, max_row_w)
+        row_sizes.append((tb[2], tb[3], text, font, style))
+
+    panel_w = max((tw + _PAD_X * 2 for tw, *_ in row_sizes), default=60)
+    panel_h = sum(th + _PAD_Y * 2 + _GAP for _, th, *_ in row_sizes) - _GAP
+
+    # ── 패널 위치: 박스 오른쪽 우선, 넘치면 왼쪽 ───────────────
+    tx = x2 + _PANEL_GAP
+    if tx + panel_w > frame_w:
+        tx = x1 - panel_w - _PANEL_GAP
+    tx = max(0, tx)
+
+    ty = y1
+    # 패널이 프레임 하단을 벗어나면 위로 올림
+    if ty + panel_h > frame_h:
+        ty = max(0, frame_h - panel_h)
+
+    # ── 패널 전체 반투명 배경 (단일 직사각형) ────────────────────
+    d.rectangle(
+        [tx - 2, ty - 2, tx + panel_w + 2, ty + panel_h + 2],
+        fill=(10, 10, 10, 160),
+    )
+
+    # ── 각 행 렌더링 ─────────────────────────────────────────────
+    cy = ty
+    for tw, th, text, font, style in row_sizes:
         row_h = th + _PAD_Y * 2
-
-        # 박스 하단을 벗어나면 중단
-        if ty + row_h > y2 - 3:
-            break
-
-        # 반투명 배경
         d.rectangle(
-            [tx, ty, tx + row_w, ty + row_h],
+            [tx, cy, tx + panel_w, cy + row_h],
             fill=(*style["bg"], _ALPHA),
         )
-        # 텍스트 (텍스트가 row_w 초과하면 잘릴 수 있으나 영상 가독성 우선)
         d.text(
-            (tx + _PAD_X, ty + _PAD_Y),
+            (tx + _PAD_X, cy + _PAD_Y),
             text,
             font=font,
             fill=(*style["fg"], 255),
         )
-        ty += row_h + _GAP
+        cy += row_h + _GAP
+
+    # ── 박스에서 패널로 연결선 ────────────────────────────────────
+    line_x = x2 if tx >= x2 else x1
+    line_y = (y1 + y2) // 2
+    panel_anchor_y = ty + panel_h // 2
+    d.line(
+        [(line_x, line_y), (tx if tx >= x2 else tx + panel_w, panel_anchor_y)],
+        fill=(180, 180, 180, 120),
+        width=1,
+    )
 
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGBA2BGR)
 

@@ -188,7 +188,7 @@ class AnalysisService:
             "type": "summary",
             "camera_id": self.camera_id,
             "source": snapshot["source"],
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "worker_count": snapshot["worker_count"],
             "no_helmet_count": snapshot["no_helmet_count"],
             "transition_candidate_count": snapshot["transition_candidate_count"],
@@ -237,7 +237,10 @@ class AnalysisService:
         now = time.monotonic()
         new_events = []
 
+        _SKIP_TYPES = {"stagger", "heat_stagger"}
         for event in events:
+            if event["type"] in _SKIP_TYPES:
+                continue
             key = (event["type"], event.get("zone_id"))
             last_seen = self._event_last_seen.get(key, 0.0)
             if now - last_seen < EVENT_COOLDOWN_SECONDS:
@@ -522,6 +525,10 @@ class AnalysisRegistry:
         elif ANALYSIS_ENABLED:
             service.start(source)
         return service
+
+    def current(self, site_id: int, camera_id: int | None = None) -> "AnalysisService | None":
+        with self._lock:
+            return self._services.get((site_id, camera_id))
 
     def stop_camera(self, site_id: int, camera_id: int | None):
         key = (site_id, camera_id)

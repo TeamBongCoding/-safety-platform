@@ -164,11 +164,12 @@ function Dashboard({ session, setSession, onShowRanking }) {
   const [newSiteLon, setNewSiteLon] = useState('')
   const [addingSite, setAddingSite] = useState(false)
   const [notice, setNotice] = useState('')
-  const [activeCameraId, setActiveCameraId] = useState(null)
-  const [activeInput, setActiveInput] = useState({ kind: 'recorded', name: '기본 녹화 영상' })
   const [heatStatus, setHeatStatus] = useState(null)
   const [demoTemp, setDemoTemp] = useState('')
   const [showDemoControls, setShowDemoControls] = useState(false)
+  const [showCamSettings, setShowCamSettings] = useState(false)
+  const [cameraStreaming, setCameraStreaming] = useState(false)
+  const [confirmDeleteSite, setConfirmDeleteSite] = useState(false)
   const [sunThreshold, setSunThreshold] = useState(1.15)
   const [shadeThreshold, setShadeThreshold] = useState(0.85)
   const [cautionTemp, setCautionTemp] = useState(31.0)
@@ -214,8 +215,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
     let disposed = false
 
     const connect = () => {
-      const summaryUrl = activeCameraId ? `${WS_URL}?camera_id=${activeCameraId}` : WS_URL
-      socket = new WebSocket(summaryUrl)
+      socket = new WebSocket(WS_URL)
       socket.onopen = () => setConnected(true)
       socket.onmessage = (event) => setSummary(JSON.parse(event.data))
       socket.onerror = () => socket.close()
@@ -232,7 +232,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
       window.clearTimeout(reconnectTimer)
       socket?.close()
     }
-  }, [activeCameraId, currentSite, setSession])
+  }, [currentSite, setSession])
 
   useEffect(() => {
     const initialTimer = window.setTimeout(loadEvents, 0)
@@ -249,8 +249,6 @@ function Dashboard({ session, setSession, onShowRanking }) {
       setSummary(null)
       setEvents([])
       setStreamReady(false)
-      setActiveCameraId(null)
-      setActiveInput({ kind: 'recorded', name: '기본 녹화 영상' })
       setSession(nextSession)
       setNotice('')
     } catch (error) {
@@ -276,8 +274,6 @@ function Dashboard({ session, setSession, onShowRanking }) {
       setSummary(null)
       setEvents([])
       setStreamReady(false)
-      setActiveCameraId(null)
-      setActiveInput({ kind: 'recorded', name: '기본 녹화 영상' })
       setSession(nextSession)
       setNewSiteName('')
       setNewSiteLat('')
@@ -323,6 +319,39 @@ function Dashboard({ session, setSession, onShowRanking }) {
     }
   }
 
+  const toggleOutdoor = async () => {
+    if (!currentSite) return
+    try {
+      const updated = await api(`/api/sites/${currentSite.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_outdoor: !currentSite.is_outdoor }),
+      })
+      setSession((s) => ({
+        ...s,
+        current_site: updated,
+        sites: s.sites.map((site) => (site.id === updated.id ? updated : site)),
+      }))
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
+
+  const deleteSite = async () => {
+    if (!currentSite) return
+    try {
+      const nextSession = await api(`/api/sites/${currentSite.id}`, { method: 'DELETE' })
+      setSummary(null)
+      setEvents([])
+      setStreamReady(false)
+      setConfirmDeleteSite(false)
+      setSession(nextSession)
+      setNotice(`'${currentSite.name}' 현장을 삭제했습니다.`)
+    } catch (error) {
+      setConfirmDeleteSite(false)
+      handleUnauthorized(error)
+    }
+  }
+
   const logout = async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' })
@@ -346,14 +375,9 @@ function Dashboard({ session, setSession, onShowRanking }) {
     if (summary?.analysis_stage === 'waiting_camera' || summary?.analysis_stage === 'waiting_frame') return '카메라 연결 대기'
     if (summary?.analysis_stage === 'camera_disconnected') return '카메라 연결 종료'
     if (summary?.analysis_stage === 'error') return '분석 오류'
-    if (summary?.analysis_running) return activeInput.kind === 'recorded' ? '녹화 영상 분석 중' : '실시간 분석 중'
+    if (summary?.analysis_running) return '영상 분석 중'
     return '분석 중지됨'
-  }, [activeInput.kind, connected, summary])
-
-  const isRecordedVideo = activeInput.kind === 'recorded'
-  const videoSourceLabel = isRecordedVideo
-    ? activeCameraId ? `테스트 녹화 영상 · ${activeInput.name}` : '서버 기본 녹화 영상'
-    : `클라이언트 라이브 카메라 · ${activeInput.name}`
+  }, [connected, summary])
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -377,6 +401,18 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
               </select>
               <button onClick={() => setAddingSite((value) => !value)} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
+              {session.sites.length > 1 && (
+                confirmDeleteSite ? (
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-xs text-red-400">'{currentSite?.name}' 삭제?</span>
+                    <button onClick={deleteSite} className="rounded-lg border border-red-500/60 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/25">확인</button>
+                    <button onClick={() => setConfirmDeleteSite(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:text-slate-200">취소</button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmDeleteSite(true)} className="rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-400/70 hover:border-red-500/60 hover:text-red-300">현장 삭제</button>
+                )
+              )}
+              <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
               <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
               <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
             </div>
@@ -411,6 +447,27 @@ function Dashboard({ session, setSession, onShowRanking }) {
               <button className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">추가</button>
             </form>
           )}
+          {showCamSettings && (
+            <div className="mt-4 flex max-w-xl flex-col gap-3 rounded-xl border border-sky-500/30 bg-sky-500/5 px-5 py-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-sky-400">카메라 1 설정</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-200">야외 카메라</p>
+                  <p className="text-xs text-slate-500">야외 촬영 시 폭염 모니터링 및 양지·그늘 감지가 활성화됩니다.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleOutdoor}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${currentSite?.is_outdoor ? 'bg-sky-500' : 'bg-slate-700'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${currentSite?.is_outdoor ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <p className="text-xs text-slate-600">
+                현재: {currentSite?.is_outdoor ? '야외 카메라 (폭염 모니터링 활성)' : '실내 카메라 (폭염 모니터링 비활성)'}
+              </p>
+            </div>
+          )}
           {notice && <p className="mt-3 text-sm text-cyan-300">{notice}</p>}
         </header>
 
@@ -427,37 +484,13 @@ function Dashboard({ session, setSession, onShowRanking }) {
           </div>
         </div>
 
-        <BrowserCameraController
-          key={currentSite?.id}
-          site={currentSite}
-          onCameraChange={(cameraId, input) => {
-            setActiveCameraId(cameraId)
-            setActiveInput(input ?? { kind: 'recorded', name: '기본 녹화 영상' })
-            setSummary(null)
-            setStreamReady(false)
-          }}
-        />
-
-        {isRecordedVideo && (
-          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-amber-200">녹화 영상 분석 모드</p>
-              <p className="mt-1 text-xs text-amber-100/70">
-                {activeCameraId
-                  ? '실시간 카메라 대신 선택한 테스트 녹화 영상을 분석하고 있습니다.'
-                  : '현재 관제 카메라가 설정되지 않아 서버에 준비된 녹화 영상을 분석하고 있습니다.'}
-              </p>
-            </div>
-            <span className="w-fit rounded-md bg-amber-400 px-2.5 py-1 text-xs font-black tracking-wider text-slate-950">RECORDED VIDEO</span>
-          </div>
-        )}
-
-        <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <MetricCard label="현재 작업 인원" value={summary?.worker_count} unit="명" tone="cyan" />
           <MetricCard label="안전모 미착용" value={summary?.no_helmet_count} unit="명" tone="red" />
-          <MetricCard label="카메라 전환 대기" value={summary?.transition_candidate_count} unit="명" tone="amber" />
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
+
+        <BrowserCameraController onStreamingChange={setCameraStreaming} />
 
         {heatStatus && (
           <HeatSection
@@ -488,17 +521,19 @@ function Dashboard({ session, setSession, onShowRanking }) {
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
               <div>
                 <h2 className="font-semibold text-white">현장 분석 영상</h2>
-                <p className="text-xs text-slate-500">{currentSite?.name} · {videoSourceLabel} · 사람 추적 · Re-ID · 안전모 · 위험구역 판정</p>
+                <p className="text-xs text-slate-500">{currentSite?.name} · 사람 추적 · 안전모 · 위험구역 판정</p>
               </div>
-              <span className={`rounded-md px-2.5 py-1 text-xs font-bold tracking-wider ${isRecordedVideo ? 'bg-amber-500/15 text-amber-300' : 'bg-red-500/15 text-red-300'}`}>{isRecordedVideo ? 'RECORDED' : 'LIVE'}</span>
+              {cameraStreaming
+                ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">LIVE</span>
+                : <span className="rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300">RECORDED</span>
+              }
             </div>
             <ZoneEditor
-              key={`${currentSite?.id}-${activeCameraId ?? 'default'}`}
+              key={currentSite?.id}
               siteId={currentSite?.id}
-              cameraId={activeCameraId}
-              streamKey={`${currentSite?.id}-${activeCameraId ?? 'default'}`}
-              streamSrc={`${API_BASE}/api/analysis/stream${activeCameraId ? `?camera_id=${activeCameraId}` : ''}`}
-              streamAlt={`${currentSite?.name} AI ${isRecordedVideo ? '녹화 영상' : '실시간 영상'} 분석`}
+              streamKey={currentSite?.id}
+              streamSrc={`${API_BASE}/api/analysis/stream`}
+              streamAlt={`${currentSite?.name} AI 영상 분석`}
               streamReady={streamReady}
               waitingMessage={summary?.analysis_message ?? '영상 스트림을 기다리고 있습니다.'}
               streamError={summary?.last_error}
@@ -507,10 +542,8 @@ function Dashboard({ session, setSession, onShowRanking }) {
               onRequestError={handleUnauthorized}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
-              <span>프레임 #{summary?.frame_index ?? 0}</span>
-              <span className={(summary?.entry_roi_count ?? 0) > 0 && (summary?.exit_roi_count ?? 0) > 0 ? '' : 'text-amber-300'}>
-                {videoSourceLabel} · {summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · 입구 ROI {summary?.entry_roi_count ?? 0} · 출구 ROI {summary?.exit_roi_count ?? 0}
-              </span>
+              <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '브라우저 카메라 실시간 분석' : '녹화 영상 분석'}</span>
+              <span>{summary?.reid_backend === 'fastreid' ? 'FastReID' : summary?.reid_backend ? 'Fallback Re-ID' : 'Re-ID 준비'} · {summary?.processing_fps ?? 0} FPS</span>
             </div>
           </div>
 
@@ -525,7 +558,18 @@ function Dashboard({ session, setSession, onShowRanking }) {
             <div className="max-h-[510px] space-y-3 overflow-y-auto pr-1">
               {summary?.workers?.length ? summary.workers.map((worker) => (
                 <WorkerCard key={worker.id} worker={worker} />
-              )) : <EmptyState text="현재 감지된 작업자가 없습니다." />}
+              )) : (
+                <EmptyState text={
+                  !connected ? '서버 연결 중...' :
+                  !summary ? '분석 상태 불러오는 중...' :
+                  summary.analysis_stage === 'stopped' ? '분석이 시작되지 않았습니다.' :
+                  summary.analysis_stage === 'loading' ? 'AI 모델 준비 중...' :
+                  (summary.analysis_stage === 'waiting_camera' || summary.analysis_stage === 'waiting_frame') ? '카메라 연결을 기다리는 중...' :
+                  summary.analysis_stage === 'camera_disconnected' ? '카메라 연결이 종료되었습니다.' :
+                  summary.analysis_stage === 'error' ? `분석 오류: ${summary.last_error ?? ''}` :
+                  '현재 감지된 작업자가 없습니다.'
+                } />
+              )}
             </div>
           </aside>
         </section>
@@ -636,14 +680,6 @@ function WorkerCard({ worker }) {
         <p className="mt-2 rounded-md bg-orange-500/15 px-2 py-1.5 text-xs font-semibold text-orange-300">
           휴식 권고 — 야외 양지, 폭염 위험
         </p>
-      )}
-      {worker.camera_transition && (
-        <p className="mt-2 rounded-md bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200">
-          카메라 #{worker.camera_transition.matched_from_camera_id}에서 연결 · Re-ID {Math.round(worker.camera_transition.reid_similarity * 100)}% · 종합 {Math.round(worker.camera_transition.match_score * 100)}% · {worker.camera_transition.transition_seconds}초
-        </p>
-      )}
-      {worker.reid_pending && !worker.camera_transition && (
-        <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">입구 ROI 전환 후보 비교 중</p>
       )}
       {worker.reasons?.length > 0 && <p className="mt-1 text-xs font-medium">{worker.reasons.join(' · ')}</p>}
       {worker.behavior_state && worker.behavior_state !== 'NORMAL' && (
@@ -827,7 +863,9 @@ function EmptyState({ text }) {
 }
 
 function formatDate(value) {
+  const utc = value && !value.endsWith('Z') && !value.includes('+') ? value + 'Z' : value
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(new Date(value))
+  }).format(new Date(utc))
 }

@@ -33,6 +33,7 @@ class SiteCreate(BaseModel):
 
 class SitePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
+    is_outdoor: bool | None = None
     latitude: float | None = None
     longitude: float | None = None
 
@@ -40,6 +41,7 @@ class SitePatch(BaseModel):
 class SiteOut(BaseModel):
     id: int
     name: str
+    is_outdoor: bool = False
     latitude: float | None = None
     longitude: float | None = None
 

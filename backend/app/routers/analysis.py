@@ -22,7 +22,7 @@ def service_for_camera(
 ):
     heat_svc = heat_registry.get(site.id, site.latitude, site.longitude, KMA_API_KEY)
     if camera_id is None:
-        return analysis_registry.get(site.id, heat_service=heat_svc)
+        return analysis_registry.get(site.id, is_outdoor=site.is_outdoor, heat_service=heat_svc)
     camera = db.scalar(
         select(Camera).where(Camera.id == camera_id, Camera.site_id == site.id)
     )
@@ -67,6 +67,25 @@ async def analysis_stream(
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
+
+
+@router.get("/snapshot")
+async def analysis_snapshot(
+    site: Site = Depends(require_current_site),
+    db: Session = Depends(get_db),
+):
+    """단일 JPEG 프레임 반환 — JupyterHub 폴링용"""
+    analysis_service = service_for_camera(None, site, db)
+    for _ in range(50):
+        jpeg, _ = analysis_service.get_frame()
+        if jpeg is not None:
+            return Response(
+                content=jpeg,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store"},
+            )
+        await asyncio.sleep(0.03)
+    raise HTTPException(status_code=503, detail="분석 프레임을 아직 사용할 수 없습니다.")
 
 
 @router.get("/frame")

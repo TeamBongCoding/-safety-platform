@@ -158,7 +158,7 @@ export default function ZoneEditor({
           return
         }
       } catch {}
-      if (active) setTimeout(poll, 100)
+      if (active) setTimeout(poll, 50)
     }
 
     poll()
