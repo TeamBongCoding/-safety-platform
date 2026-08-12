@@ -28,8 +28,8 @@ def _load_font(size: int = 14):
     return ImageFont.load_default()
 
 
-FONT_SM = _load_font(12)   # ID·보조 정보
-FONT_MD = _load_font(13)   # 상태 뱃지
+FONT_SM = _load_font(11)   # ID·보조 정보
+FONT_MD = _load_font(12)   # 상태 뱃지
 
 LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 255)}
 
@@ -56,12 +56,11 @@ def draw_status(
     helmet_on,
     zone_label,
     level,
-    track_id,
+    global_person_id,
+    local_track_id,
     in_heat_zone=False,
     heat_seconds=0.0,
-    helmet_violation=False,
     behavior_state=None,
-    behavior_heat_related=False,
     behavior_debug=None,
 ):
     x1, y1, x2, y2 = map(int, box)
@@ -79,24 +78,22 @@ def draw_status(
     d = ImageDraw.Draw(img, "RGBA")
 
     # ── 행 정의 ──────────────────────────────────────────────────
-    short_id = track_id.replace("person-", "")
+    short_id = global_person_id.replace("person-", "")
     if helmet_on is True:
         helmet_text, helmet_style = "안전모 착용", _ROW_HELMET_OK
-    elif helmet_on is False and helmet_violation:
-        helmet_text, helmet_style = "안전모 미착용", _ROW_HELMET_NO
     elif helmet_on is False:
-        helmet_text, helmet_style = "안전모 미착용 (허용)", _ROW_HELMET_OK
+        helmet_text, helmet_style = "안전모 미착용", _ROW_HELMET_NO
     else:
         helmet_text, helmet_style = "안전모 판정 불가", _ROW_HELMET_UNKNOWN
     rows = [
-        (f"작업자 #{short_id}", FONT_SM, _ROW_ID),
+        (f"G·{short_id} L·{local_track_id}", FONT_SM, _ROW_ID),
         (helmet_text, FONT_MD, helmet_style),
     ]
     if zone_label:
         rows.append((f"구역 {zone_label}", FONT_SM, _ROW_ZONE))
     if in_heat_zone:
         m, s = divmod(int(heat_seconds), 60)
-        rows.append((f"폭염 누적 {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
+        rows.append((f"폭염 주의 · {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
     else:
         rows.append(("폭염구역 아님", FONT_SM, _ROW_HEAT_NO))
 
@@ -104,11 +101,10 @@ def draw_status(
     if behavior_state is not None and behavior_state.value != "NORMAL":
         from .pose_behavior_detector import BEHAVIOR_LABELS, BehaviorState
         label = BEHAVIOR_LABELS.get(behavior_state, behavior_state.value)
-        if behavior_heat_related:
-            label = f"폭염 {label}"
         is_severe = behavior_state in (BehaviorState.FALL, BehaviorState.FALL_STILL)
         style = _ROW_BEHAVIOR_ALERT if is_severe else _ROW_BEHAVIOR_WARN
-        rows.append((f"[행동] {label}", FONT_MD, style))
+        # A horizontal person's box may be too short for lower-priority rows.
+        rows.insert(0, (f"[행동] {label}", FONT_MD, style))
 
     # DEBUG_POSE: 진단 정보 추가 행
     if DEBUG_POSE and behavior_debug:
@@ -117,60 +113,38 @@ def draw_status(
         debug_txt = f"R:{ratio:.2f} A:{angle:.0f}" if angle is not None else f"R:{ratio:.2f}"
         rows.append((debug_txt, FONT_SM, _ROW_ID))
 
-    # ── 행 크기 사전 계산 → 패널 너비 결정 ──────────────────────
+    # ── 박스 내부 좌상단에 행 렌더링 ─────────────────────────────
     frame_h, frame_w = frame.shape[:2]
-    _PANEL_GAP = 6   # 박스와 패널 사이 간격
-
-    row_sizes = []
+    prepared_rows = []
     for text, font, style in rows:
         tb = d.textbbox((0, 0), text, font=font)
-        row_sizes.append((tb[2], tb[3], text, font, style))
-
-    panel_w = max((tw + _PAD_X * 2 for tw, *_ in row_sizes), default=60)
-    panel_h = sum(th + _PAD_Y * 2 + _GAP for _, th, *_ in row_sizes) - _GAP
-
-    # ── 패널 위치: 박스 오른쪽 우선, 넘치면 왼쪽 ───────────────
-    tx = x2 + _PANEL_GAP
-    if tx + panel_w > frame_w:
-        tx = x1 - panel_w - _PANEL_GAP
-    tx = max(0, tx)
-
-    ty = y1
-    # 패널이 프레임 하단을 벗어나면 위로 올림
-    if ty + panel_h > frame_h:
-        ty = max(0, frame_h - panel_h)
-
-    # ── 패널 전체 반투명 배경 (단일 직사각형) ────────────────────
-    d.rectangle(
-        [tx - 2, ty - 2, tx + panel_w + 2, ty + panel_h + 2],
-        fill=(10, 10, 10, 160),
-    )
-
-    # ── 각 행 렌더링 ─────────────────────────────────────────────
-    cy = ty
-    for tw, th, text, font, style in row_sizes:
+        tw, th = tb[2], tb[3]
+        row_w = min(tw + _PAD_X * 2, frame_w)
         row_h = th + _PAD_Y * 2
+        prepared_rows.append((text, font, style, row_w, row_h))
+
+    panel_w = max((row[3] for row in prepared_rows), default=1)
+    panel_h = sum(row[4] for row in prepared_rows) + _GAP * max(0, len(prepared_rows) - 1)
+    tx = max(0, min(x1, frame_w - panel_w))
+    ty = y1 - panel_h - 3
+    if ty < 0:
+        ty = min(y2 + 3, max(0, frame_h - panel_h))
+
+    for text, font, style, row_w, row_h in prepared_rows:
+
+        # 반투명 배경
         d.rectangle(
-            [tx, cy, tx + panel_w, cy + row_h],
+            [tx, ty, tx + row_w, ty + row_h],
             fill=(*style["bg"], _ALPHA),
         )
+        # 텍스트 (텍스트가 row_w 초과하면 잘릴 수 있으나 영상 가독성 우선)
         d.text(
-            (tx + _PAD_X, cy + _PAD_Y),
+            (tx + _PAD_X, ty + _PAD_Y),
             text,
             font=font,
             fill=(*style["fg"], 255),
         )
-        cy += row_h + _GAP
-
-    # ── 박스에서 패널로 연결선 ────────────────────────────────────
-    line_x = x2 if tx >= x2 else x1
-    line_y = (y1 + y2) // 2
-    panel_anchor_y = ty + panel_h // 2
-    d.line(
-        [(line_x, line_y), (tx if tx >= x2 else tx + panel_w, panel_anchor_y)],
-        fill=(180, 180, 180, 120),
-        width=1,
-    )
+        ty += row_h + _GAP
 
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGBA2BGR)
 

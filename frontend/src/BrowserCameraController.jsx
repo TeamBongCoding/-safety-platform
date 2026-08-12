@@ -202,7 +202,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
     || '카메라'
 
   return (
-    <section className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+    <section className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <h2 className="font-semibold text-white">카메라 / 영상 입력</h2>
@@ -276,7 +276,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
             </label>
           )}
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1">
             {isStreaming ? (
               <button
                 onClick={stopCamera}

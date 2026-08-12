@@ -1,6 +1,6 @@
 """State-machine based heat behavior detection from YOLO Pose keypoints.
 
-Per-track history and state machine for a single camera stream.
+Per-(camera_id, local_track_id) history and state machine.
 Detects: fall, stillness after fall, sudden sit, staggering.
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from ..config import (
     FALL_BODY_ANGLE,
     FALL_DURATION_SEC,
     HEAT_BEHAVIOR_COOLDOWN_SEC,
+    POSE_STATE_HOLD_SECONDS,
     STAGGER_DIRECTION_CHANGES,
     STAGGER_WINDOW_SEC,
     STILL_DURATION_SEC,
@@ -29,6 +30,7 @@ class BehaviorState(str, Enum):
     NORMAL = "NORMAL"
     STAGGER = "STAGGER"
     SUDDEN_SIT = "SUDDEN_SIT"
+    LYING = "LYING"
     FALL = "FALL"
     FALL_STILL = "FALL_STILL"
 
@@ -37,6 +39,7 @@ BEHAVIOR_RISK_SCORES: dict[BehaviorState, int] = {
     BehaviorState.NORMAL: 0,
     BehaviorState.STAGGER: 20,
     BehaviorState.SUDDEN_SIT: 25,
+    BehaviorState.LYING: 40,
     BehaviorState.FALL: 60,
     BehaviorState.FALL_STILL: 90,
 }
@@ -45,6 +48,7 @@ BEHAVIOR_LABELS: dict[BehaviorState, str] = {
     BehaviorState.NORMAL: "정상",
     BehaviorState.STAGGER: "휘청거림",
     BehaviorState.SUDDEN_SIT: "주저앉음",
+    BehaviorState.LYING: "누워있음",
     BehaviorState.FALL: "쓰러짐",
     BehaviorState.FALL_STILL: "쓰러짐+정지",
 }
@@ -53,6 +57,7 @@ BEHAVIOR_LABELS: dict[BehaviorState, str] = {
 BEHAVIOR_EVENT_TYPES: dict[BehaviorState, str] = {
     BehaviorState.STAGGER: "heat_stagger",
     BehaviorState.SUDDEN_SIT: "heat_sudden_sit",
+    BehaviorState.LYING: "heat_lying",
     BehaviorState.FALL: "heat_fall",
     BehaviorState.FALL_STILL: "heat_fall_still",
 }
@@ -61,14 +66,22 @@ BEHAVIOR_EVENT_TYPES: dict[BehaviorState, str] = {
 BEHAVIOR_EVENT_TYPES_PLAIN: dict[BehaviorState, str] = {
     BehaviorState.STAGGER: "stagger",
     BehaviorState.SUDDEN_SIT: "sudden_sit",
+    BehaviorState.LYING: "lying",
     BehaviorState.FALL: "fall",
     BehaviorState.FALL_STILL: "fall_still",
 }
+
+
+def behavior_event_type(state: BehaviorState, in_heat_zone: bool) -> str | None:
+    """Preserve the API used by the current safety-event tests and callers."""
+    event_types = BEHAVIOR_EVENT_TYPES if in_heat_zone else BEHAVIOR_EVENT_TYPES_PLAIN
+    return event_types.get(state)
 
 _STATE_CONFIDENCE: dict[BehaviorState, float] = {
     BehaviorState.NORMAL: 0.0,
     BehaviorState.STAGGER: 0.60,
     BehaviorState.SUDDEN_SIT: 0.65,
+    BehaviorState.LYING: 0.75,
     BehaviorState.FALL: 0.85,
     BehaviorState.FALL_STILL: 0.95,
 }
@@ -93,13 +106,8 @@ class BehaviorResult:
     risk_score: int = 0
     confidence: float = 0.0
     label: str = "정상"
+    event_type: Optional[str] = None
     debug: dict = field(default_factory=dict)
-
-
-def behavior_event_type(state: BehaviorState, in_heat_zone: bool) -> str | None:
-    """Map behavior to a heat event only for a worker currently in a heat zone."""
-    event_types = BEHAVIOR_EVENT_TYPES if in_heat_zone else BEHAVIOR_EVENT_TYPES_PLAIN
-    return event_types.get(state)
 
 
 class _TrackHistory:
@@ -125,6 +133,12 @@ class _TrackHistory:
         ratio_ok = pf.bbox_ratio > FALL_BBOX_RATIO
         angle_ok = pf.body_angle is not None and pf.body_angle < FALL_BODY_ANGLE
         return ratio_ok or angle_ok
+
+    def _is_lying_candidate(self, pf: PoseFrame) -> bool:
+        """Recognize prone/push-up posture without calling it a confirmed fall."""
+        angle_low = pf.body_angle is not None and pf.body_angle < 65.0
+        low_profile = pf.bbox_ratio >= 0.75
+        return pf.bbox_ratio >= 1.05 or (angle_low and low_profile)
 
     def _is_still(self, now: float) -> bool:
         """Hip center barely moved in the last STILL_DURATION_SEC (normalized)."""
@@ -214,8 +228,10 @@ class _TrackHistory:
         # Priority: FALL_STILL > FALL > SUDDEN_SIT > STAGGER > NORMAL
         if fall_confirmed:
             self._state = BehaviorState.FALL_STILL if self._is_still(now) else BehaviorState.FALL
+        elif self._is_lying_candidate(pf):
+            self._state = BehaviorState.LYING
         else:
-            if self._state in (BehaviorState.FALL, BehaviorState.FALL_STILL):
+            if self._state in (BehaviorState.LYING, BehaviorState.FALL, BehaviorState.FALL_STILL):
                 self._state = BehaviorState.NORMAL
 
             if self._is_sudden_sit():
@@ -239,6 +255,7 @@ class _TrackHistory:
             risk_score=BEHAVIOR_RISK_SCORES[state],
             confidence=_STATE_CONFIDENCE[state],
             label=BEHAVIOR_LABELS[state],
+            event_type=BEHAVIOR_EVENT_TYPES.get(state),
             debug={
                 "bbox_ratio": round(pf.bbox_ratio, 2),
                 "body_angle": round(pf.body_angle, 1) if pf.body_angle is not None else None,
@@ -249,7 +266,7 @@ class _TrackHistory:
 
 
 class PoseBehaviorDetector:
-    """Manage per-track behavior history and event cooldowns."""
+    """Manages per-(camera_id, local_track_id) behavior tracking and event cooldowns."""
 
     _CLEANUP_INTERVAL = 60.0
     _TRACK_TIMEOUT = 30.0
@@ -273,6 +290,7 @@ class PoseBehaviorDetector:
 
     def update(
         self,
+        camera_id,
         local_track_id: int,
         pose_features: dict,
         bbox: list[float],
@@ -311,29 +329,49 @@ class PoseBehaviorDetector:
             bbox_ratio=bw / bh,
         )
 
-        key = local_track_id
+        key = (camera_id, local_track_id)
         if key not in self._tracks:
             self._tracks[key] = _TrackHistory()
         return self._tracks[key].update(pf)
 
     def should_emit_event(
         self,
+        camera_id,
         local_track_id: int,
         state: BehaviorState,
         now: float,
     ) -> bool:
         """Returns True if the event cooldown has passed for this track+state."""
-        key = (local_track_id, state.value)
+        key = (camera_id, local_track_id, state.value)
         if now - self._event_cooldowns.get(key, 0.0) >= HEAT_BEHAVIOR_COOLDOWN_SEC:
             self._event_cooldowns[key] = now
             return True
         return False
 
-    def remove_track(self, local_track_id: int):
-        self._tracks.pop(local_track_id, None)
+    def current(self, camera_id, local_track_id: int, now: float) -> BehaviorResult | None:
+        """Keep the latest abnormal state through a brief pose-model dropout."""
+        history = self._tracks.get((camera_id, local_track_id))
+        if history is None or not history._history:
+            return None
+        if now - history._history[-1].timestamp > POSE_STATE_HOLD_SECONDS:
+            return None
+        state = history._state
+        if state == BehaviorState.NORMAL:
+            return None
+        return BehaviorResult(
+            state=state,
+            risk_score=BEHAVIOR_RISK_SCORES[state],
+            confidence=_STATE_CONFIDENCE[state],
+            label=BEHAVIOR_LABELS[state],
+            event_type=BEHAVIOR_EVENT_TYPES.get(state),
+            debug={"state": state.value, "cached": True},
+        )
 
-    def reset(self):
-        """Clear histories when the single camera stream is replaced."""
+    def remove_track(self, camera_id, local_track_id: int):
+        self._tracks.pop((camera_id, local_track_id), None)
+
+    def reset(self) -> None:
+        """Clear pose histories when an analysis source is stopped or switched."""
         self._tracks.clear()
         self._event_cooldowns.clear()
         self._last_cleanup = 0.0

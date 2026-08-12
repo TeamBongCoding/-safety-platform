@@ -8,10 +8,10 @@ from typing import Optional
 import numpy as np
 
 from ..config import (
-    MODEL_CONFIDENCE,
-    MODEL_IMAGE_SIZE,
     POSE_ENABLED,
     POSE_KEYPOINT_CONF,
+    POSE_IMAGE_SIZE,
+    POSE_MODEL_CONFIDENCE,
     POSE_MODEL_PATH,
     PROJECT_ROOT,
 )
@@ -143,10 +143,12 @@ class PoseDetector:
             return []
         with self._lock:
             try:
+                # A separate, lower threshold is intentional: a generic person
+                # detector often misses crouched or horizontal bodies.
                 results = self._model(
                     frame,
-                    conf=MODEL_CONFIDENCE,
-                    imgsz=MODEL_IMAGE_SIZE,
+                    conf=POSE_MODEL_CONFIDENCE,
+                    imgsz=POSE_IMAGE_SIZE,
                     verbose=False,
                 )[0]
                 out = []

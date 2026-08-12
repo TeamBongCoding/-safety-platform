@@ -129,6 +129,7 @@ BACKEND_HEALTH_URL="http://${BACKEND_HEALTH_HOST}:${BACKEND_PORT}/health"
 
 if (( WITH_ANALYZER )); then
   export ANALYSIS_ENABLED=1
+  export POSE_ENABLED=1
 fi
 
 PIDS=()

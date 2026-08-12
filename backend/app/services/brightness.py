@@ -25,10 +25,22 @@ def estimate_sun_shade(
     if x2c - x1c < 4 or y2c - y1c < 8:
         return 'unknown'
     # 프레임 경계에 잘린 박스는 신뢰도 낮음
-    if x1c != x1 or x2c != x2 or y1c != y1 or y2c != y2:
-        return 'unknown'
-    roi_y1 = y1c + int((y2c - y1c) * 0.80)
-    roi = frame[roi_y1:y2c, x1c:x2c]
+    box_w = x2c - x1c
+    box_h = y2c - y1c
+    margin_x = max(4, int(box_w * 0.20))
+    ground_h = max(6, int(box_h * 0.20))
+    gx1 = max(0, x1c - margin_x)
+    gx2 = min(w, x2c + margin_x)
+    gy1 = min(h, y2c + 2)
+    gy2 = min(h, gy1 + ground_h)
+    roi = frame[gy1:gy2, gx1:gx2]
+    if roi.size == 0:
+        lower_y = y1c + int(box_h * 0.70)
+        left = frame[lower_y:y2c, gx1:x1c]
+        right = frame[lower_y:y2c, x2c:gx2]
+        strips = [item for item in (left, right) if item.size]
+        if strips:
+            roi = np.concatenate(strips, axis=1)
     if roi.size == 0:
         return 'unknown'
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)

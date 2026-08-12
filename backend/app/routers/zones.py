@@ -12,7 +12,13 @@ from ..schemas import ZoneCreate, ZoneOut, ZoneVisibility
 
 router = APIRouter(prefix="/api/zones", tags=["zones"])
 
-SAFETY_ZONE_TYPES = ("no_entry", "fall_risk", "heavy_equip", "work_area")
+VISIBLE_ZONE_TYPES = (
+    "no_entry",
+    "fall_risk",
+    "heavy_equip",
+    "work_area",
+    "camera_overlap",
+)
 
 
 def serialize_zone(zone: Zone) -> ZoneOut:
@@ -40,7 +46,7 @@ def require_site_zone(zone_id: int, site: Site, db: Session) -> Zone:
         select(Zone).where(
             Zone.id == zone_id,
             Zone.site_id == site.id,
-            Zone.zone_type.in_(SAFETY_ZONE_TYPES),
+            Zone.zone_type.in_(VISIBLE_ZONE_TYPES),
         )
     )
     if not zone:
@@ -55,7 +61,7 @@ def list_zones(
 ):
     zones = db.scalars(
         select(Zone)
-        .where(Zone.site_id == site.id, Zone.zone_type.in_(SAFETY_ZONE_TYPES))
+        .where(Zone.site_id == site.id, Zone.zone_type.in_(VISIBLE_ZONE_TYPES))
         .order_by(Zone.id)
     ).all()
     return [serialize_zone(zone) for zone in zones]

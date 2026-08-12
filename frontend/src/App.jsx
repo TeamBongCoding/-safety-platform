@@ -436,24 +436,24 @@ function Dashboard({ session, setSession, onShowRanking }) {
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
         <header className="mb-5 border-b border-slate-800 pb-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
               <p className="mb-1 text-xs font-semibold tracking-[0.22em] text-cyan-400">SITE SAFETY OPERATIONS</p>
               <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">AI 안전관리 관제센터</h1>
               <p className="mt-1 text-sm text-slate-400">{session.user.company_name} · 담당자 {session.user.manager_name}</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
               <label className="sr-only" htmlFor="site-select">관리 현장</label>
               <select
                 id="site-select"
                 value={currentSite?.id ?? ''}
                 onChange={(event) => selectSite(Number(event.target.value))}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-white outline-none focus:border-cyan-500 sm:flex-none sm:px-3"
               >
                 {session.sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
               </select>
-              <button onClick={() => setAddingSite((value) => !value)} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10">현장 추가</button>
+              <button onClick={() => setAddingSite((value) => !value)} className="min-h-11 whitespace-nowrap rounded-lg border border-cyan-500/40 px-2.5 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10 sm:px-3">현장 추가</button>
               {currentSite && (
                 confirmDeleteSite ? (
                   <span className="flex flex-wrap items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/5 p-1.5">
@@ -476,8 +476,8 @@ function Dashboard({ session, setSession, onShowRanking }) {
                 )
               )}
               <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
-              <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
-              <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
+              <button onClick={onShowRanking} className="min-h-11 whitespace-nowrap rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20 sm:px-3">오늘 안전 순위</button>
+              <button onClick={logout} className="min-h-11 whitespace-nowrap rounded-lg border border-slate-700 px-2.5 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300 sm:px-3">로그아웃</button>
             </div>
           </div>
 

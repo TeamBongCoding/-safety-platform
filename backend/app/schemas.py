@@ -82,6 +82,7 @@ class ZoneCreate(BaseModel):
         "fall_risk",
         "heavy_equip",
         "work_area",
+        "camera_overlap",
     ] = "no_entry"
     risk_level: Literal["low", "medium", "high", "critical"] = "high"
     description: str = Field(default="", max_length=1000)

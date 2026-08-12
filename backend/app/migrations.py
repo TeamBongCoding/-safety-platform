@@ -3,11 +3,13 @@ from sqlalchemy import inspect
 
 def migrate_legacy_schema(engine) -> None:
     """create_all이 추가하지 못하는 기존 SQLite 컬럼을 안전하게 보강한다."""
-    # These statements and PRAGMA are only valid for databases created by
-    # older local SQLite versions. PostgreSQL/Supabase is created from the
-    # SQLAlchemy metadata in app.main instead.
-    if engine.dialect.name != "sqlite":
+    dialect = engine.dialect.name
+    if dialect not in {"sqlite", "postgresql"}:
         return
+
+    datetime_type = "DATETIME" if dialect == "sqlite" else "TIMESTAMP"
+    false_literal = "0" if dialect == "sqlite" else "FALSE"
+    true_literal = "1" if dialect == "sqlite" else "TRUE"
 
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
@@ -16,10 +18,11 @@ def migrate_legacy_schema(engine) -> None:
         "users": [
             ("role", "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'"),
             ("status", "ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'"),
-            ("last_login_at", "ALTER TABLE users ADD COLUMN last_login_at DATETIME"),
-            ("suspended_at", "ALTER TABLE users ADD COLUMN suspended_at DATETIME"),
+            ("last_login_at", f"ALTER TABLE users ADD COLUMN last_login_at {datetime_type}"),
+            ("suspended_at", f"ALTER TABLE users ADD COLUMN suspended_at {datetime_type}"),
         ],
         "sites": [
+            ("is_outdoor", f"ALTER TABLE sites ADD COLUMN is_outdoor BOOLEAN NOT NULL DEFAULT {false_literal}"),
             ("latitude", "ALTER TABLE sites ADD COLUMN latitude FLOAT"),
             ("longitude", "ALTER TABLE sites ADD COLUMN longitude FLOAT"),
         ],
@@ -28,8 +31,8 @@ def migrate_legacy_schema(engine) -> None:
             ("risk_level", "ALTER TABLE zones ADD COLUMN risk_level VARCHAR(20) NOT NULL DEFAULT 'high'"),
             ("description", "ALTER TABLE zones ADD COLUMN description TEXT NOT NULL DEFAULT ''"),
             ("precautions", "ALTER TABLE zones ADD COLUMN precautions TEXT NOT NULL DEFAULT ''"),
-            ("visible", "ALTER TABLE zones ADD COLUMN visible BOOLEAN NOT NULL DEFAULT 1"),
-            ("updated_at", "ALTER TABLE zones ADD COLUMN updated_at DATETIME"),
+            ("visible", f"ALTER TABLE zones ADD COLUMN visible BOOLEAN NOT NULL DEFAULT {true_literal}"),
+            ("updated_at", f"ALTER TABLE zones ADD COLUMN updated_at {datetime_type}"),
         ],
         "events": [
             ("site_id", "ALTER TABLE events ADD COLUMN site_id INTEGER REFERENCES sites(id)"),
@@ -61,4 +64,5 @@ def migrate_legacy_schema(engine) -> None:
             connection.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)"
             )
-        connection.exec_driver_sql("PRAGMA optimize")
+        if dialect == "sqlite":
+            connection.exec_driver_sql("PRAGMA optimize")

@@ -22,7 +22,10 @@ const ZONE_TYPES = {
   fall_risk: '추락위험',
   heavy_equip: '중장비 작업반경',
   work_area: '작업구역',
+  camera_overlap: '카메라 중복 시야',
 }
+
+const REMOVED_ZONE_TYPES = new Set(['camera_entry', 'camera_exit'])
 
 const clamp = (value) => Math.min(1, Math.max(0, value))
 const svgPoints = (points) => points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')
@@ -109,7 +112,7 @@ export default function ZoneEditor({
   const loadZones = useCallback(async () => {
     try {
       const nextZones = await api(zonesUrl)
-      setZones(nextZones)
+      setZones(nextZones.filter((zone) => !REMOVED_ZONE_TYPES.has(zone.zone_type)))
       setLoadError('')
     } catch (error) {
       setLoadError(error.message)
@@ -607,25 +610,25 @@ export default function ZoneEditor({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-950/40 px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button type="button" onClick={setGlobalVisibility} className={`rounded-md border px-2.5 py-1.5 ${overlayVisible ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>
+      <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-950/40 px-2 py-2.5 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+          <button type="button" onClick={setGlobalVisibility} className={`min-h-9 shrink-0 whitespace-nowrap rounded-md border px-2 py-1.5 sm:px-2.5 ${overlayVisible ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 text-slate-400'}`}>
             구역 표시 {overlayVisible ? '켜짐' : '꺼짐'}
           </button>
-          <span className="text-slate-500">저장 구역 {zones.length}개 · 단일 카메라</span>
-          {loading && <span className="text-slate-500">불러오는 중...</span>}
+          <span className="min-w-0 flex-1 text-center text-[10px] leading-tight text-slate-500 sm:text-left sm:text-xs">저장 구역 {zones.length}개 · 기본 영상</span>
+          {loading && <span className="hidden text-slate-500 sm:inline">불러오는 중...</span>}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 items-center justify-end gap-2">
           {recording ? (
-            <button type="button" onClick={stopRecording} className="rounded-md border border-red-400/60 bg-red-500/20 px-3 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/30">
+            <button type="button" onClick={stopRecording} className="hidden rounded-md border border-red-400/60 bg-red-500/20 px-3 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/30 sm:inline-flex">
               ■ 녹화 종료 · {formatRecordingTime(recordingSeconds)}
             </button>
           ) : (
-            <button type="button" onClick={startRecording} disabled={!streamReady || editorOpen} className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="button" onClick={startRecording} disabled={!streamReady || editorOpen} className="hidden rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40 sm:inline-flex">
               ● 원본·오버레이 녹화
             </button>
           )}
-          <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen || recording} className="rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={beginCreate} disabled={!streamReady || editorOpen || recording} className="min-h-9 whitespace-nowrap rounded-md bg-cyan-500 px-2 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3">
             새 위험구역 설정
           </button>
         </div>

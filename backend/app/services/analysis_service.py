@@ -26,7 +26,7 @@ from ..config import (
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
 from ..time_utils import kst_now, kst_today
-from .person_tracking import CameraPersonTracker, HeatExposureTracker
+from .person_tracking import CameraPersonTracker, GlobalIdentityManager, HeatExposureTracker
 from .pose_detector import pose_detector
 
 DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
@@ -48,6 +48,7 @@ class AnalysisService:
     def __init__(
         self,
         site_id: int,
+        identity_manager: GlobalIdentityManager | None = None,
         external: bool = False,
         is_outdoor: bool = False,
         heat_service=None,
@@ -57,7 +58,8 @@ class AnalysisService:
         self.is_outdoor = is_outdoor
         self._heat_service = heat_service
         self._heat_exposure_tracker = HeatExposureTracker()
-        self.person_tracker = CameraPersonTracker()
+        self.identity_manager = identity_manager or GlobalIdentityManager()
+        self.person_tracker = CameraPersonTracker(site_id, self.identity_manager)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._frame_ready = threading.Event()
@@ -79,6 +81,11 @@ class AnalysisService:
             "worker_count": 0,
             "unique_person_count": 0,
             "no_helmet_count": 0,
+            "transition_candidate_count": 0,
+            "entry_roi_count": 0,
+            "exit_roi_count": 0,
+            "overlap_roi_count": 0,
+            "reid_backend": None,
             "workers": [],
             "last_error": None,
         }
@@ -149,7 +156,7 @@ class AnalysisService:
     def detach_external_camera(self):
         from .pose_behavior_detector import pose_behavior_detector
 
-        self.person_tracker.flush()
+        self.person_tracker.flush([])
         pose_behavior_detector.reset()
         with self._lock:
             self._external_connected = False
@@ -174,7 +181,7 @@ class AnalysisService:
         self._frame_ready.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
-        self.person_tracker.flush()
+        self.person_tracker.flush([])
         pose_behavior_detector.reset()
         self._set_status(running=False, stage="stopped", message="분석이 중지되었습니다.")
 
@@ -215,6 +222,10 @@ class AnalysisService:
             "analysis_message": snapshot["message"],
             "frame_index": snapshot["frame_index"],
             "processing_fps": snapshot["processing_fps"],
+            "unique_person_count": snapshot.get("unique_person_count", snapshot["worker_count"]),
+            "transition_candidate_count": snapshot.get("transition_candidate_count", 0),
+            "overlap_roi_count": snapshot.get("overlap_roi_count", 0),
+            "reid_backend": snapshot.get("reid_backend"),
             "workers": snapshot["workers"],
             "last_error": snapshot["last_error"],
         }
@@ -229,7 +240,13 @@ class AnalysisService:
             for zone in db.scalars(
                 select(Zone).where(
                     Zone.site_id == self.site_id,
-                    Zone.zone_type.in_(("no_entry", "fall_risk", "heavy_equip", "work_area")),
+                    Zone.zone_type.in_((
+                        "no_entry",
+                        "fall_risk",
+                        "heavy_equip",
+                        "work_area",
+                        "camera_overlap",
+                    )),
                 )
             ).all():
                 polygon = json.loads(zone.polygon)
@@ -342,6 +359,7 @@ class AnalysisService:
                     width,
                     height,
                     self.person_tracker,
+                    self.identity_manager,
                     include_status=True,
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
@@ -454,6 +472,7 @@ class AnalysisService:
                     width,
                     height,
                     self.person_tracker,
+                    self.identity_manager,
                     include_status=True,
                     is_outdoor=self.is_outdoor,
                     heat_status=heat_status,
@@ -505,6 +524,7 @@ class AnalysisRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._services: dict[int, AnalysisService] = {}
+        self._identity_managers: dict[int, GlobalIdentityManager] = {}
 
     def get(
         self,
@@ -517,8 +537,12 @@ class AnalysisRegistry:
         with self._lock:
             service = self._services.get(site_id)
             if service is None:
+                identity_manager = self._identity_managers.setdefault(
+                    site_id, GlobalIdentityManager()
+                )
                 service = AnalysisService(
                     site_id,
+                    identity_manager=identity_manager,
                     external=external,
                     is_outdoor=is_outdoor,
                     heat_service=heat_service,
