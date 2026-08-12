@@ -1,41 +1,41 @@
-﻿clip_id,file_name,test_group,duration_sec,expected_behavior,in_heat_zone,helmet_on,zone_type,zone_status,expected_event,expected_event_count,person_count,tracking_expectation,notes
-C001,general_helmet_near_01.mp4,helmet_zone,12,normal,false,true,general,outside,none,0,1,not_applicable,"근거리, 밝은 조명, 정면"
-C002,general_helmet_far_01.mp4,helmet_zone,15,walking,false,true,general,outside,none,0,2,not_applicable,"원거리, 측면, 두 명 모두 안전모 착용"
-C003,general_nohelmet_bright_01.mp4,helmet_zone,12,normal,false,false,general,outside,none,0,1,not_applicable,"일반구역 미착용, 경고가 없어야 함"
-C004,general_nohelmet_dim_01.mp4,helmet_zone,15,walking,false,false,general,outside,none,0,1,not_applicable,"약간 어두운 조명, 일반구역 미착용"
-C005,general_nohelmet_cap_01.mp4,helmet_zone,15,walking,false,false,general,outside,none,0,1,not_applicable,안전모와 비슷한 색의 일반 모자 착용
-C006,work_helmet_front_01.mp4,helmet_zone,12,normal,false,true,work_area,inside,none,0,1,not_applicable,"작업구역 내부, 정면"
-C007,work_helmet_side_01.mp4,helmet_zone,15,walking,false,true,work_area,inside,none,0,1,not_applicable,"작업구역 내부, 측면 이동"
-C008,work_helmet_occluded_01.mp4,helmet_zone,15,walking,false,true,work_area,inside,none,0,2,not_applicable,"두 명 모두 착용, 한 명의 상체 일부 가림"
-C009,work_nohelmet_front_01.mp4,helmet_zone,12,normal,false,false,work_area,inside,no_helmet,1,1,not_applicable,"작업구역 미착용, 정면"
-C010,work_nohelmet_far_01.mp4,helmet_zone,15,walking,false,false,work_area,inside,no_helmet,1,1,not_applicable,"작업구역 미착용, 원거리"
-C011,work_nohelmet_two_01.mp4,helmet_zone,18,walking,false,false,work_area,inside,no_helmet,2,2,not_applicable,"두 명 모두 미착용, 사람별 1건씩 기대"
-C012,noentry_intrusion_01.mp4,helmet_zone,15,walking,false,true,no_entry,inside,zone_intrusion,1,1,not_applicable,출입금지구역 경계를 완전히 통과
-C013,noentry_intrusion_two_01.mp4,helmet_zone,18,walking,false,true,no_entry,inside,zone_intrusion,2,2,not_applicable,두 명이 차례로 출입금지구역 진입
-C014,noentry_approach_slow_01.mp4,helmet_zone,15,walking,false,true,no_entry,near,zone_approach,1,1,not_applicable,경계 근처를 천천히 지나가되 진입하지 않음
-C015,noentry_approach_fast_01.mp4,helmet_zone,12,walking,false,true,no_entry,near,zone_approach,1,1,not_applicable,경계 근처를 빠르게 통과하되 진입하지 않음
-C016,outside_unrelated_move_01.mp4,helmet_zone,15,walking,false,true,no_entry,outside,none,0,1,not_applicable,위험구역과 충분히 떨어진 곳에서 이동
-C017,normal_stand_01.mp4,behavior,12,normal,false,true,general,outside,none,0,1,not_applicable,정상적으로 서 있기
-C018,normal_walk_fast_01.mp4,behavior,15,walking,false,true,general,outside,none,0,1,not_applicable,정상적으로 빠르게 걷기
-C019,slow_chair_sit_front_01.mp4,behavior,15,slow_sit,false,true,general,outside,none,0,1,not_applicable,정면에서 의자에 천천히 앉기
-C020,slow_chair_sit_side_01.mp4,behavior,15,slow_sit,false,true,general,outside,none,0,1,not_applicable,측면에서 의자에 천천히 앉기
-C021,pick_up_object_01.mp4,behavior,12,pick_up,false,true,general,outside,none,0,1,not_applicable,바닥의 물건을 집고 다시 일어서기
-C022,bend_waist_01.mp4,behavior,12,bend,false,true,general,outside,none,0,1,not_applicable,허리를 숙였다가 다시 펴기
-C023,sudden_sit_front_01.mp4,behavior,15,sudden_sit,false,true,general,outside,sudden_sit,1,1,not_applicable,"정면, 매트 위에서 빠르게 주저앉기"
-C024,sudden_sit_side_01.mp4,behavior,15,sudden_sit,false,true,general,outside,sudden_sit,1,1,not_applicable,"측면, 매트 위에서 빠르게 주저앉기"
-C025,fall_front_mat_01.mp4,behavior,15,fall,false,true,general,outside,fall,1,1,not_applicable,"정면, 두꺼운 매트 위에서 천천히 연출"
-C026,fall_side_mat_01.mp4,behavior,15,fall,false,true,general,outside,fall,1,1,not_applicable,"측면, 두꺼운 매트 위에서 천천히 연출"
-C027,fall_partial_occlusion_01.mp4,behavior,18,fall,false,true,general,outside,fall,1,1,not_applicable,하체 일부가 가려진 상태에서 안전하게 연출
-C028,fall_still_mat_01.mp4,behavior,20,fall_still,false,true,general,outside,fall_still,1,1,not_applicable,쓰러진 뒤 판정에 필요한 시간 동안 움직이지 않기
-C029,plain_sudden_sit_context_01.mp4,heat_context,15,sudden_sit,false,true,general,outside,sudden_sit,1,1,not_applicable,폭염구역 밖 주저앉음
-C030,heat_sudden_sit_front_01.mp4,heat_context,15,sudden_sit,true,true,general,outside,heat_sudden_sit,1,1,not_applicable,"폭염구역 안, 정면 주저앉음"
-C031,heat_sudden_sit_side_01.mp4,heat_context,15,sudden_sit,true,true,general,outside,heat_sudden_sit,1,1,not_applicable,"폭염구역 안, 측면 주저앉음"
-C032,plain_fall_context_01.mp4,heat_context,15,fall,false,true,general,outside,fall,1,1,not_applicable,폭염구역 밖 쓰러짐
-C033,heat_fall_01.mp4,heat_context,15,fall,true,true,general,outside,heat_fall,1,1,not_applicable,폭염구역 안 쓰러짐
-C034,heat_fall_still_01.mp4,heat_context,20,fall_still,true,true,general,outside,heat_fall_still,1,1,not_applicable,폭염구역 안 쓰러짐 후 정지
-C035,heat_dwell_10sec_01.mp4,heat_context,18,normal,true,true,general,outside,rest_needed,1,1,not_applicable,"폭염구역에 연속 10초 이상 체류, 휴식 권고 표시 확인"
-C036,heat_reset_reentry_01.mp4,heat_context,20,heat_exit_reenter,true,true,general,outside,heat_timer_reset,1,1,not_applicable,"폭염구역 안 3초 → 밖 10초 이상 → 재진입, 재진입 시 누적시간 0초 확인"
-C037,track_single_left_right_01.mp4,tracking,15,walking,false,true,general,outside,none,0,1,same_id,"한 사람이 화면 좌우로 이동, 영상 내 ID 변경 0회가 정답"
-C038,track_occlusion_return_01.mp4,tracking,15,walking,false,true,general,outside,none,0,1,same_id,"사람이 약 1초 가려졌다가 등장, 동일 ID 유지 기대"
-C039,track_two_cross_01.mp4,tracking,18,walking,false,true,general,outside,none,0,2,same_id_each_person,"두 사람이 서로 교차, 각 사람의 ID가 바뀌지 않아야 함"
-C040,track_exit_reenter_01.mp4,tracking,18,walking,false,true,general,outside,none,0,1,new_id_allowed,"화면 밖으로 완전히 나갔다가 재등장, 새 ID도 오류로 세지 않음"
+clip_id,file_name,test_group,target_duration_sec,duration_tolerance_sec,scenario_action,expected_behavior_state,in_heat_context,helmet_on,zone_type,zone_status,expected_events,expected_event_count,event_count_unit,expected_rest_needed,expected_timer_reset,expected_person_count,expected_id_switch_count,tracking_expectation,zone_fixture,heat_fixture,recording_summary
+C001,general_helmet_near_01.mp4,helmet_zone,12,2,stand,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"일반구역에서 안전모를 쓴 한 명을 근거리 정면 촬영"
+C002,general_helmet_far_01.mp4,helmet_zone,15,2,walk,NORMAL,false,true,general,outside,none,0,person_episode,false,false,2,,not_applicable,none,none,"일반구역 원거리에서 안전모를 쓴 두 명이 측면으로 이동"
+C003,general_nohelmet_bright_01.mp4,helmet_zone,12,2,stand,NORMAL,false,false,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"밝은 일반구역에서 안전모 없이 서 있으나 경고는 없어야 함"
+C004,general_nohelmet_dim_01.mp4,helmet_zone,15,2,walk,NORMAL,false,false,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"약간 어두운 일반구역에서 안전모 없이 천천히 이동"
+C005,general_nohelmet_cap_01.mp4,helmet_zone,15,2,walk,NORMAL,false,false,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"안전모와 비슷한 색의 일반 모자를 쓰고 일반구역을 이동"
+C006,work_helmet_front_01.mp4,helmet_zone,12,2,stand,NORMAL,false,true,work_area,inside,none,0,person_episode,false,false,1,,not_applicable,work_area,none,"작업구역 안에서 안전모를 쓰고 정면으로 서 있음"
+C007,work_helmet_side_01.mp4,helmet_zone,15,2,walk,NORMAL,false,true,work_area,inside,none,0,person_episode,false,false,1,,not_applicable,work_area,none,"작업구역 안에서 안전모를 쓰고 측면으로 이동"
+C008,work_helmet_occluded_01.mp4,helmet_zone,15,2,walk,NORMAL,false,true,work_area,inside,none,0,person_episode,false,false,2,,not_applicable,work_area,none,"작업구역 안의 두 명 모두 안전모 착용, 한 명은 잠시 부분 가림"
+C009,work_nohelmet_front_01.mp4,helmet_zone,12,2,stand,NORMAL,false,false,work_area,inside,no_helmet,1,person_episode,false,false,1,,not_applicable,work_area,none,"작업구역 안에서 안전모 없이 정면으로 서 있음"
+C010,work_nohelmet_far_01.mp4,helmet_zone,15,2,walk,NORMAL,false,false,work_area,inside,no_helmet,1,person_episode,false,false,1,,not_applicable,work_area,none,"작업구역 안 원거리에서 안전모 없이 이동"
+C011,work_nohelmet_two_01.mp4,helmet_zone,18,2,walk,NORMAL,false,false,work_area,inside,no_helmet,2,person_episode,false,false,2,,not_applicable,work_area,none,"작업구역 안의 두 명이 모두 안전모 없이 이동"
+C012,noentry_intrusion_01.mp4,helmet_zone,15,2,enter_zone,NORMAL,false,true,no_entry,inside,zone_intrusion,1,person_episode,false,false,1,,not_applicable,no_entry,none,"한 명이 출입금지구역 경계를 한 번 완전히 통과"
+C013,noentry_intrusion_two_01.mp4,helmet_zone,18,2,enter_zone,NORMAL,false,true,no_entry,inside,zone_intrusion,2,person_episode,false,false,2,,not_applicable,no_entry,none,"두 명이 시간차를 두고 출입금지구역에 한 번씩 진입"
+C014,noentry_approach_slow_01.mp4,helmet_zone,15,2,approach_zone,NORMAL,false,true,no_entry,near,zone_approach,1,person_episode,false,false,1,,not_applicable,no_entry,none,"한 명이 경계 바로 밖을 천천히 지나가며 내부에는 진입하지 않음"
+C015,noentry_approach_fast_01.mp4,helmet_zone,12,2,approach_zone,NORMAL,false,true,no_entry,near,zone_approach,1,person_episode,false,false,1,,not_applicable,no_entry,none,"한 명이 경계 바로 밖을 빠르게 지나가며 내부에는 진입하지 않음"
+C016,outside_unrelated_move_01.mp4,helmet_zone,15,2,walk,NORMAL,false,true,no_entry,outside,none,0,person_episode,false,false,1,,not_applicable,no_entry,none,"한 명이 출입금지구역에서 충분히 떨어진 곳만 이동"
+C017,normal_stand_01.mp4,behavior,12,2,stand,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"한 명이 전신이 보이게 정상적으로 서 있음"
+C018,normal_walk_fast_01.mp4,behavior,15,2,fast_walk,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"한 명이 화면 안을 빠르지만 정상적인 걸음으로 이동"
+C019,slow_chair_sit_front_01.mp4,behavior,15,2,slow_sit,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"정면에서 의자에 천천히 앉았다가 다시 일어남"
+C020,slow_chair_sit_side_01.mp4,behavior,15,2,slow_sit,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"측면에서 의자에 천천히 앉았다가 다시 일어남"
+C021,pick_up_object_01.mp4,behavior,12,2,pick_up,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"바닥의 가벼운 물건을 집고 다시 일어남"
+C022,bend_waist_01.mp4,behavior,12,2,bend,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,not_applicable,none,none,"허리를 숙였다가 천천히 다시 펴며 쓰러지지 않음"
+C023,sudden_sit_front_01.mp4,behavior,15,2,sudden_sit,SUDDEN_SIT,false,true,general,outside,sudden_sit,1,person_episode,false,false,1,,not_applicable,none,none,"정면에서 낮은 매트나 의자로 빠르게 주저앉는 동작을 안전하게 연출"
+C024,sudden_sit_side_01.mp4,behavior,15,2,sudden_sit,SUDDEN_SIT,false,true,general,outside,sudden_sit,1,person_episode,false,false,1,,not_applicable,none,none,"측면에서 낮은 매트나 의자로 빠르게 주저앉는 동작을 안전하게 연출"
+C025,fall_front_mat_01.mp4,behavior,15,2,staged_fall,FALL,false,true,general,outside,fall,1,person_episode,false,false,1,,not_applicable,none,none,"정면에서 무릎을 댄 낮은 자세부터 두꺼운 매트로 쓰러짐을 연출하고 4초 안에 회복"
+C026,fall_side_mat_01.mp4,behavior,15,2,staged_fall,FALL,false,true,general,outside,fall,1,person_episode,false,false,1,,not_applicable,none,none,"측면에서 무릎을 댄 낮은 자세부터 두꺼운 매트로 쓰러짐을 연출하고 4초 안에 회복"
+C027,fall_partial_occlusion_01.mp4,behavior,18,2,staged_fall,FALL,false,true,general,outside,fall,1,person_episode,false,false,1,,not_applicable,none,none,"하체 일부만 가린 상태에서 낮은 자세부터 매트로 쓰러짐을 연출하고 4초 안에 회복"
+C028,fall_still_mat_01.mp4,behavior,20,2,staged_fall_hold,FALL_STILL,false,true,general,outside,fall|fall_still,2,person_episode,false,false,1,,not_applicable,none,none,"낮은 자세부터 매트로 쓰러짐을 연출한 뒤 7초 이상 움직이지 않음"
+C029,plain_sudden_sit_context_01.mp4,heat_context,15,2,sudden_sit,SUDDEN_SIT,false,true,general,outside,sudden_sit,1,person_episode,false,false,1,,not_applicable,none,none,"일반 환경에서 빠르게 주저앉는 동작을 안전하게 연출"
+C030,heat_sudden_sit_front_01.mp4,heat_context,15,2,sudden_sit,SUDDEN_SIT,true,true,general,outside,heat_sudden_sit,1,person_episode,false,false,1,,not_applicable,none,heat_full_clip,"평가에서 폭염 맥락을 강제하고 정면 주저앉기 동작을 연출"
+C031,heat_sudden_sit_side_01.mp4,heat_context,15,2,sudden_sit,SUDDEN_SIT,true,true,general,outside,heat_sudden_sit,1,person_episode,false,false,1,,not_applicable,none,heat_full_clip,"평가에서 폭염 맥락을 강제하고 측면 주저앉기 동작을 연출"
+C032,plain_fall_context_01.mp4,heat_context,15,2,staged_fall,FALL,false,true,general,outside,fall,1,person_episode,false,false,1,,not_applicable,none,none,"일반 환경에서 낮은 자세부터 매트로 쓰러짐을 연출하고 4초 안에 회복"
+C033,heat_fall_01.mp4,heat_context,15,2,staged_fall,FALL,true,true,general,outside,heat_fall,1,person_episode,false,false,1,,not_applicable,none,heat_full_clip,"평가에서 폭염 맥락을 강제하고 낮은 자세부터 쓰러짐을 연출한 뒤 4초 안에 회복"
+C034,heat_fall_still_01.mp4,heat_context,20,2,staged_fall_hold,FALL_STILL,true,true,general,outside,heat_fall|heat_fall_still,2,person_episode,false,false,1,,not_applicable,none,heat_full_clip,"평가에서 폭염 맥락을 강제하고 매트로 쓰러진 뒤 7초 이상 움직이지 않음"
+C035,heat_dwell_10sec_01.mp4,heat_context,18,2,heat_dwell,NORMAL,true,true,general,outside,none,0,person_episode,true,false,1,,not_applicable,none,heat_full_clip,"위험 행동 없이 12초 이상 화면에 머물며 휴식 권고 상태를 확인"
+C036,heat_reset_reentry_01.mp4,heat_context,20,2,heat_exit_reenter,NORMAL,mixed,true,general,outside,none,0,person_episode,false,true,1,,not_applicable,none,heat_reset_reentry,"폭염 3초, 비폭염 11초, 폭염 재진입 순서로 타이머 초기화를 확인"
+C037,track_single_left_right_01.mp4,tracking,15,2,walk,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,0,same_id,none,none,"한 명이 화면 왼쪽에서 오른쪽으로 이동하며 ID 변경이 없어야 함"
+C038,track_occlusion_return_01.mp4,tracking,15,2,walk_occluded,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,0,same_id,none,none,"한 명이 약 1초 완전히 가려졌다가 다시 나타나며 동일 ID를 유지해야 함"
+C039,track_two_cross_01.mp4,tracking,18,2,two_people_cross,NORMAL,false,true,general,outside,none,0,person_episode,false,false,2,0,same_id_each_person,none,none,"서로 다른 옷의 두 명이 중앙에서 교차해도 각 ID가 바뀌지 않아야 함"
+C040,track_exit_reenter_01.mp4,tracking,18,2,exit_reenter,NORMAL,false,true,general,outside,none,0,person_episode,false,false,1,,new_id_allowed,none,none,"한 명이 화면 밖으로 완전히 나갔다가 다시 들어오며 새 ID도 허용"

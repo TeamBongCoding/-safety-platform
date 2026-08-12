@@ -1,0 +1,22 @@
+{
+  "none": {
+    "description": "전체 영상에서 폭염 맥락을 적용하지 않음",
+    "segments": [
+      {"start_sec": 0, "end_sec": null, "in_heat": false}
+    ]
+  },
+  "heat_full_clip": {
+    "description": "전체 영상에서 폭염 맥락을 강제로 적용",
+    "segments": [
+      {"start_sec": 0, "end_sec": null, "in_heat": true}
+    ]
+  },
+  "heat_reset_reentry": {
+    "description": "3초 폭염 노출 후 11초 동안 벗어났다가 재진입",
+    "segments": [
+      {"start_sec": 0, "end_sec": 3, "in_heat": true},
+      {"start_sec": 3, "end_sec": 14, "in_heat": false},
+      {"start_sec": 14, "end_sec": null, "in_heat": true}
+    ]
+  }
+}

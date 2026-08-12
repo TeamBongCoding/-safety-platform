@@ -15,6 +15,10 @@ dist/
 data/videos/*.mp4
 data/videos/*.mov
 backend/output*.mp4
+evaluation/videos/*
+!evaluation/videos/.gitkeep
+evaluation/results/*
+!evaluation/results/.gitkeep
 
 # 환경변수 (텔레그램 토큰 등)
 .env
