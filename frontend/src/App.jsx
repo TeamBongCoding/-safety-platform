@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import AdminDashboard from './AdminDashboard'
 import BrowserCameraController from './BrowserCameraController'
 import RankingDashboard from './RankingDashboard'
+import RiskDashboard from './RiskDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
 
@@ -73,7 +74,16 @@ function UserExperience({ session, setSession }) {
       </main>
     )
   }
-  return <Dashboard session={session} setSession={setSession} onShowRanking={() => setScreen('ranking')} />
+  if (screen === 'risk') {
+    return (
+      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1400px]">
+          <RiskDashboard onBack={() => setScreen('dashboard')} />
+        </div>
+      </main>
+    )
+  }
+  return <Dashboard session={session} setSession={setSession} onShowRanking={() => setScreen('ranking')} onShowRisk={() => setScreen('risk')} />
 }
 
 function AuthScreen({ onAuthenticated, initialError }) {
@@ -158,7 +168,7 @@ const heatLevelMeta = {
   severe: { label: '폭염 심각', color: 'red', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', badge: 'bg-red-500/20 text-red-200' },
 }
 
-function Dashboard({ session, setSession, onShowRanking }) {
+function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   const currentSite = session.current_site
   const [connected, setConnected] = useState(false)
   const [summary, setSummary] = useState(null)
@@ -477,6 +487,7 @@ function Dashboard({ session, setSession, onShowRanking }) {
               )}
               <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
               <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
+              <button onClick={onShowRisk} className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-300 hover:bg-violet-500/20">위험 추세 분석</button>
               <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
             </div>
           </div>

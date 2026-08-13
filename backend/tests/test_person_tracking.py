@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from app.config import TRACK_MAX_MISSED_FRAMES
 from app.services.person_tracking import CameraPersonTracker, HeatExposureTracker
 
 
@@ -50,7 +51,7 @@ class CameraPersonTrackerTests(unittest.TestCase):
             160,
             120,
         )[0]
-        for _ in range(13):
+        for _ in range(TRACK_MAX_MISSED_FRAMES + 1):
             tracker.update(self.frame, [], 160, 120)
         replacement = tracker.update(
             self.frame,

@@ -57,3 +57,52 @@ export async function api(path, options = {}) {
   }
   return data
 }
+
+// ── Risk API ──────────────────────────────────────────────────────────────────
+
+export function fetchRiskOverview(horizon = '24h') {
+  return api(`/api/risk/overview?horizon=${horizon}`)
+}
+
+export function generateRiskReport(horizon = '7d', eventType = 'no_helmet') {
+  return api(`/api/risk/reports/generate?horizon=${horizon}&event_type=${eventType}`, { method: 'POST' })
+}
+
+export function fetchLatestReport(horizon = '7d', eventType = 'no_helmet') {
+  return api(`/api/risk/reports/latest?horizon=${horizon}&event_type=${eventType}`)
+}
+
+// ── Episode API ───────────────────────────────────────────────────────────────
+
+export function fetchEpisodes(params = {}) {
+  const q = new URLSearchParams()
+  if (params.resolved != null) q.set('resolved', String(params.resolved))
+  if (params.event_type) q.set('event_type', params.event_type)
+  if (params.limit) q.set('limit', String(params.limit))
+  return api(`/api/events/episodes${q.size ? '?' + q : ''}`)
+}
+
+export function resolveEpisode(id, note = '') {
+  return api(`/api/events/episodes/${id}/resolve`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note }),
+  })
+}
+
+// ── Knowledge API ─────────────────────────────────────────────────────────────
+
+export function fetchDocuments() {
+  return api('/api/knowledge/documents')
+}
+
+export function deleteDocument(id) {
+  return api(`/api/knowledge/documents/${id}`, { method: 'DELETE' })
+}
+
+export function uploadDocument(formData) {
+  return api('/api/knowledge/documents', {
+    method: 'POST',
+    body: formData,
+    headers: {},  // multipart; no Content-Type override
+  })
+}

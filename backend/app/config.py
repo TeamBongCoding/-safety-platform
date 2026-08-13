@@ -75,3 +75,29 @@ STAGGER_WINDOW_SEC = float(os.getenv("STAGGER_WINDOW_SEC", "3.0"))
 STAGGER_DIRECTION_CHANGES = int(os.getenv("STAGGER_DIRECTION_CHANGES", "4"))
 HEAT_BEHAVIOR_COOLDOWN_SEC = float(os.getenv("HEAT_BEHAVIOR_COOLDOWN_SEC", "15.0"))
 # ──────────────────────────────────────────────────────────────────
+# ── Episode 집계 ──────────────────────────────────────────────────
+EVENT_EPISODE_CLOSE_GAP_SEC = float(os.getenv("EVENT_EPISODE_CLOSE_GAP_SEC", "30"))
+EVENT_EPISODE_MIN_DURATION_SEC = float(os.getenv("EVENT_EPISODE_MIN_DURATION_SEC", "2"))
+EVENT_EPISODE_UPDATE_INTERVAL_SEC = float(os.getenv("EVENT_EPISODE_UPDATE_INTERVAL_SEC", "10"))
+MODEL_VERSION = os.getenv("MODEL_VERSION", "1.0")
+RULE_VERSION = os.getenv("RULE_VERSION", "1.0")
+# ── 로컬 LLM ─────────────────────────────────────────────────────
+LOCAL_LLM_ENABLED = os.getenv("LOCAL_LLM_ENABLED", "0") == "1"
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8001/v1")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "Qwen/Qwen3-4B")
+LOCAL_LLM_TIMEOUT_SEC = float(os.getenv("LOCAL_LLM_TIMEOUT_SEC", "60"))
+LOCAL_LLM_MAX_TOKENS = int(os.getenv("LOCAL_LLM_MAX_TOKENS", "1000"))
+LOCAL_LLM_TEMPERATURE = float(os.getenv("LOCAL_LLM_TEMPERATURE", "0.1"))
+LOCAL_LLM_REQUIRE_SUCCESS = os.getenv("LOCAL_LLM_REQUIRE_SUCCESS", "0") == "1"
+# ── Supabase ──────────────────────────────────────────────────────
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_DOCUMENT_BUCKET = os.getenv("SUPABASE_DOCUMENT_BUCKET", "safety-documents")
+SUPABASE_SNAPSHOT_BUCKET = os.getenv("SUPABASE_SNAPSHOT_BUCKET", "event-snapshots")
+SUPABASE_CLIP_BUCKET = os.getenv("SUPABASE_CLIP_BUCKET", "event-clips")
+# ── RAG / Embedding ───────────────────────────────────────────────
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.7"))
+# ──────────────────────────────────────────────────────────────────

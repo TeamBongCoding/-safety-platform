@@ -139,3 +139,121 @@ class EventOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── EventEpisode ──────────────────────────────────────────────────────────────
+
+class EpisodeOut(BaseModel):
+    id: int
+    site_id: int | None
+    camera_id: str | None
+    track_id: str | None
+    event_type: str
+    zone_id: int | None
+    started_at: datetime
+    ended_at: datetime | None
+    duration_sec: float
+    severity: str
+    confidence_min: float
+    confidence_avg: float
+    confidence_max: float
+    observation_count: int
+    snapshot_path: str | None
+    model_version: str
+    rule_version: str
+    resolved: bool
+    resolution_note: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("started_at", "ended_at", "created_at", "updated_at")
+    def serialize_dt(self, value: datetime | None) -> str | None:
+        return kst_isoformat(value) if value else None
+
+    class Config:
+        from_attributes = True
+
+
+class EpisodeResolveRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+
+
+# ── Risk ──────────────────────────────────────────────────────────────────────
+
+class RiskFactorOut(BaseModel):
+    metric: str
+    value: float
+    description: str
+    weight: float = 1.0
+
+
+class RiskResultOut(BaseModel):
+    event_type: str
+    horizon: str
+    risk_score: float
+    risk_level: str
+    baseline_rate: float
+    recent_rate: float
+    change_percent: float
+    confidence_level: str
+    factors: list[RiskFactorOut]
+    limitations: list[str]
+    generated_at: datetime
+    site_id: int | None
+    zone_id: int | None
+    model_version: str
+
+    @field_serializer("generated_at")
+    def serialize_dt(self, value: datetime) -> str:
+        return kst_isoformat(value)
+
+
+class RiskOverviewOut(BaseModel):
+    horizon: str
+    results: list[RiskResultOut]
+    overall_risk_level: str
+    overall_risk_score: float
+    generated_at: datetime
+
+    @field_serializer("generated_at")
+    def serialize_dt(self, value: datetime) -> str:
+        return kst_isoformat(value)
+
+
+class RiskReportOut(BaseModel):
+    id: int
+    event_type: str
+    horizon: str
+    risk_level: str
+    risk_score: float
+    change_percent: float
+    confidence_level: str
+    llm_report: dict | None
+    generated_at: datetime
+
+    @field_serializer("generated_at")
+    def serialize_dt(self, value: datetime) -> str:
+        return kst_isoformat(value)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Knowledge ─────────────────────────────────────────────────────────────────
+
+class DocumentOut(BaseModel):
+    id: int
+    site_id: int | None
+    title: str
+    source: str
+    version: str
+    effective_date: datetime | None
+    created_at: datetime
+    chunk_count: int = 0
+
+    @field_serializer("effective_date", "created_at")
+    def serialize_dt(self, value: datetime | None) -> str | None:
+        return kst_isoformat(value) if value else None
+
+    class Config:
+        from_attributes = True

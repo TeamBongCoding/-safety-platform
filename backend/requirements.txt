@@ -8,3 +8,6 @@ ultralytics
 shapely
 python-dotenv
 pillow
+pgvector
+python-multipart
+pypdf

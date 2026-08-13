@@ -12,7 +12,7 @@ from .config import CORS_ORIGINS, KMA_API_KEY, PROJECT_ROOT, SESSION_COOKIE_NAME
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Site
-from .routers import admin, analysis, auth, events, heat, rankings, sites, zones
+from .routers import admin, analysis, auth, events, heat, knowledge, rankings, risk, sites, zones
 from .services.analysis_service import analysis_registry
 from .services.heat_service import heat_registry
 
@@ -45,11 +45,18 @@ app.include_router(rankings.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
 app.include_router(heat.router)
+app.include_router(risk.router)
+app.include_router(knowledge.router)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    from .config import DATABASE_URL, LOCAL_LLM_ENABLED
+    return {
+        "status": "ok",
+        "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
+        "llm_enabled": LOCAL_LLM_ENABLED,
+    }
 
 
 @app.websocket("/ws/camera-upload")

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m pytest tests/test_rag.py tests/test_risk_api.py -v)",
+      "Bash(python -m pytest tests/test_risk_api.py::TestRiskAPIAuth::test_authenticated_risk_overview_empty -xvs)",
+      "Bash(pip show *)",
+      "Bash(python3 -m pytest --version)",
+      "Bash(.venv/bin/pytest tests/test_risk_api.py::TestRiskAPIAuth::test_authenticated_risk_overview_empty -xvs)",
+      "Bash(PYTHONPATH=. .venv/bin/pytest tests/test_risk_api.py -xvs)",
+      "Bash(PYTHONPATH=. .venv/bin/pytest tests/ -v --tb=short)"
+    ]
+  }
+}

@@ -17,15 +17,21 @@ from sqlalchemy import func, select
 
 from ..config import (
     ANALYSIS_ENABLED,
+    EVENT_EPISODE_CLOSE_GAP_SEC,
+    EVENT_EPISODE_MIN_DURATION_SEC,
+    EVENT_EPISODE_UPDATE_INTERVAL_SEC,
     LIVE_INFER_EVERY,
     LIVE_POSE_INFER_EVERY,
+    MODEL_VERSION,
     POSE_INFER_EVERY,
     PROJECT_ROOT,
+    RULE_VERSION,
     VIDEO_SOURCE,
 )
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
 from ..time_utils import kst_now, kst_today
+from .episode_aggregator import EpisodeAggregator, ExposureAccumulator
 from .person_tracking import CameraPersonTracker, HeatExposureTracker
 from .pose_detector import pose_detector
 
@@ -69,6 +75,19 @@ class AnalysisService:
         self._frame_version = 0
         self._event_last_seen: dict[tuple[str, int | None], float] = {}
         self._zones: list[dict] = []
+        self._episode_aggregator = EpisodeAggregator(
+            session_factory=SessionLocal,
+            should_persist=should_persist_event,
+            close_gap_sec=EVENT_EPISODE_CLOSE_GAP_SEC,
+            min_duration_sec=EVENT_EPISODE_MIN_DURATION_SEC,
+            update_interval_sec=EVENT_EPISODE_UPDATE_INTERVAL_SEC,
+            model_version=MODEL_VERSION,
+            rule_version=RULE_VERSION,
+        )
+        self._exposure_accumulator = ExposureAccumulator(
+            site_id=site_id,
+            session_factory=SessionLocal,
+        )
         self._status = {
             "running": False,
             "stage": "stopped",
@@ -151,6 +170,8 @@ class AnalysisService:
 
         self.person_tracker.flush()
         pose_behavior_detector.reset()
+        self._episode_aggregator.flush()
+        self._exposure_accumulator.flush()
         with self._lock:
             self._external_connected = False
             self._pending_jpeg = None
@@ -176,6 +197,8 @@ class AnalysisService:
             self._thread.join(timeout=10)
         self.person_tracker.flush()
         pose_behavior_detector.reset()
+        self._episode_aggregator.flush()
+        self._exposure_accumulator.flush()
         self._set_status(running=False, stage="stopped", message="분석이 중지되었습니다.")
 
     def get_frame(self):
@@ -362,6 +385,14 @@ class AnalysisService:
                         self._frame_version += 1
 
                 self._save_events(events)
+                # Episode 단위 집계 (site_id 주입)
+                for ev in events:
+                    ev.setdefault("site_id", self.site_id)
+                self._episode_aggregator.process_events(events)
+                self._exposure_accumulator.tick(
+                    worker_count=frame_status.get("worker_count", 0),
+                    frame_dt=frame_interval,
+                )
 
                 rate_frames += 1
                 rate_elapsed = time.monotonic() - rate_started_at
@@ -473,6 +504,13 @@ class AnalysisService:
                         self._frame_version += 1
 
                 self._save_events(events)
+                for ev in events:
+                    ev.setdefault("site_id", self.site_id)
+                self._episode_aggregator.process_events(events)
+                self._exposure_accumulator.tick(
+                    worker_count=frame_status.get("worker_count", 0),
+                )
+
                 rate_frames += 1
                 elapsed = time.monotonic() - rate_started_at
                 if elapsed >= 1.0:
