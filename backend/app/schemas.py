@@ -257,3 +257,10 @@ class DocumentOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class DocumentChunkOut(BaseModel):
+    id: int
+    document_id: int
+    title: str
+    section: str | None
+    content: str

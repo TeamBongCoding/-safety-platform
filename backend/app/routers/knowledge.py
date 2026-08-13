@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_current_site
 from ..database import SessionLocal, get_db
 from ..models import DocumentChunk, KnowledgeDocument, Site
-from ..schemas import DocumentOut
+from ..schemas import DocumentChunkOut, DocumentOut
 from ..services.rag.indexer import DocumentIndexer, allowed_extension
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])

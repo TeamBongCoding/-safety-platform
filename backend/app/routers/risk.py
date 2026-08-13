@@ -205,7 +205,7 @@ def generate_report(
     from ..services.llm_client import call_llm, fallback_report
     llm_report = call_llm(risk_result, retrieved)
     if llm_report is None:
-        llm_report = fallback_report(risk_result, horizon)
+        llm_report = fallback_report(risk_result, horizon, retrieved)
 
     llm_dict = llm_report.model_dump()
 

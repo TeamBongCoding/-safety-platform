@@ -99,6 +99,10 @@ export function fetchDocuments() {
   return api('/api/knowledge/documents')
 }
 
+export function fetchDocumentChunk(id) {
+  return api(`/api/knowledge/chunks/${id}`)
+}
+
 export function deleteDocument(id) {
   return api(`/api/knowledge/documents/${id}`, { method: 'DELETE' })
 }
