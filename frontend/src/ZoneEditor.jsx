@@ -153,50 +153,62 @@ export default function ZoneEditor({
     }
   }, [updateDisplayRect])
 
-  // MJPEG는 JupyterHub 프록시를 통과하지 못하므로 단일 JPEG 폴링으로 영상을 표시한다.
+  // 프록시가 장시간 MJPEG 응답을 버퍼링하거나 끊는 경우를 피하기 위해,
+  // 서버가 새 프레임을 만들 때까지 기다리는 버전 기반 롱폴링을 사용한다.
   useEffect(() => {
     if (!streamSrc) return undefined
+    const image = imageRef.current
+    if (!image) return undefined
+
     const frameUrl = streamSrc.replace('/stream', '/frame')
-    if (frameUrl === streamSrc) return undefined  // /stream이 없으면 폴링 불필요
+    if (frameUrl === streamSrc) return undefined
 
     let active = true
     let gotFirstFrame = false
+    let lastVersion = ''
     let prevBlob = ''
     const revoke = (u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) }
 
     const poll = async () => {
       if (!active) return
+      let retryDelay = 0
       try {
-        const resp = await fetch(frameUrl, { credentials: 'include' })
+        const url = lastVersion
+          ? `${frameUrl}?after=${encodeURIComponent(lastVersion)}`
+          : frameUrl
+        const resp = await fetch(url, { credentials: 'include' })
         if (!active) return
         if (resp.ok) {
+          lastVersion = resp.headers.get('X-Frame-Version') || lastVersion
           const blob = await resp.blob()
           if (!active) return
-          const url = URL.createObjectURL(blob)
-          if (imageRef.current) imageRef.current.src = url
+          const objectUrl = URL.createObjectURL(blob)
+          image.src = objectUrl
           if (!gotFirstFrame) {
             gotFirstFrame = true
             updateDisplayRect()
             onStreamLoad?.()
           }
           const old = prevBlob
-          prevBlob = url
-          setTimeout(() => revoke(old), 500)
+          prevBlob = objectUrl
+          setTimeout(() => revoke(old), 250)
         } else if (resp.status === 401 || resp.status === 403) {
           active = false
           onStreamError?.()
           return
+        } else {
+          retryDelay = 100
         }
       } catch {
-        // 프레임 전환 중의 일시적인 네트워크 오류는 다음 폴링에서 복구한다.
+        retryDelay = 250
       }
-      if (active) setTimeout(poll, 50)
+      if (active) setTimeout(poll, retryDelay)
     }
 
     poll()
     return () => {
       active = false
-      setTimeout(() => revoke(prevBlob), 500)
+      setTimeout(() => revoke(prevBlob), 250)
     }
   }, [streamSrc, onStreamError, onStreamLoad, updateDisplayRect])
 

@@ -104,6 +104,7 @@ if [[ -n "$TUNNEL_TOKEN" ]]; then
 else
   echo "[run] Cloudflare Quick Tunnel 시작 (재시작할 때 URL이 바뀝니다)"
   "$CLOUDFLARED_BIN" tunnel --no-autoupdate \
+    --protocol http2 \
     --url "http://127.0.0.1:$PORT" &
 fi
 TUNNEL_PID=$!

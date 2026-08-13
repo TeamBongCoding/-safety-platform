@@ -197,6 +197,9 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
     else setNotice(error.message)
   }, [setSession])
 
+  const handleStreamLoad = useCallback(() => setStreamReady(true), [])
+  const handleStreamError = useCallback(() => setStreamReady(false), [])
+
   // 체감온도 상태 30초 폴링 — 서버 임계값으로 로컬 상태 초기화
   useEffect(() => {
     if (!currentSite) return undefined
@@ -611,8 +614,8 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
               streamReady={streamReady}
               waitingMessage={summary?.analysis_message ?? '영상 스트림을 기다리고 있습니다.'}
               streamError={summary?.last_error}
-              onStreamLoad={() => setStreamReady(true)}
-              onStreamError={() => setStreamReady(false)}
+              onStreamLoad={handleStreamLoad}
+              onStreamError={handleStreamError}
               onRequestError={handleUnauthorized}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">

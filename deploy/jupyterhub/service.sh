@@ -84,6 +84,7 @@ start_service() {
   echo "$pid" > "$PID_FILE"
 
   echo "[service] 시작 중: PID $pid"
+  local service_ready=0
   for ((attempt = 0; attempt < 180; attempt++)); do
     if ! kill -0 "$pid" 2>/dev/null; then
       echo "[service] 시작 실패" >&2
@@ -91,10 +92,23 @@ start_service() {
       return 1
     fi
     if grep -q "Cloudflare .*Tunnel 시작" "$LOG_FILE"; then
+      service_ready=1
       break
     fi
     sleep 0.5
   done
+
+  if (( ! service_ready )); then
+    echo "[service] 90초 안에 준비되지 않았습니다." >&2
+    tail -n 80 "$LOG_FILE" >&2
+    if [[ -f "$MODE_FILE" && "$(cat "$MODE_FILE")" == "group" ]]; then
+      kill -TERM -- "-$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE" "$MODE_FILE"
+    return 1
+  fi
 
   local configured_url tunnel_token
   configured_url="${PUBLIC_URL:-$(dotenv_value PUBLIC_URL)}"
@@ -105,6 +119,15 @@ start_service() {
       grep -Eq 'https://[-a-zA-Z0-9]+\.trycloudflare\.com' "$LOG_FILE" && break
       sleep 0.5
     done
+  fi
+
+  local port
+  port="${PORT:-$(dotenv_value PORT)}"
+  port="${port:-8000}"
+  if ! is_running || ! curl --fail --silent "http://127.0.0.1:$port/health" >/dev/null; then
+    echo "[service] 시작 직후 프로세스 또는 FastAPI 응답이 사라졌습니다." >&2
+    tail -n 80 "$LOG_FILE" >&2
+    return 1
   fi
 
   echo "[service] 실행 완료"

@@ -52,22 +52,29 @@ async def analysis_stream(site: Site = Depends(require_current_site)):
     )
 
 
-async def _current_frame(site: Site, original: bool = False) -> Response:
+async def _current_frame(
+    site: Site,
+    original: bool = False,
+    after: int | None = None,
+) -> Response:
     analysis_service = service_for_site(site)
     for _ in range(50):
-        jpeg, _ = (
+        jpeg, version = (
             analysis_service.get_original_frame()
             if original
             else analysis_service.get_frame()
         )
-        if jpeg is not None:
+        if jpeg is not None and (after is None or version != after):
             return Response(
                 content=jpeg,
                 media_type="image/jpeg",
-                headers={"Cache-Control": "no-store"},
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Frame-Version": str(version),
+                },
             )
         await asyncio.sleep(0.03)
-    raise HTTPException(status_code=503, detail="분석 프레임을 아직 사용할 수 없습니다.")
+    raise HTTPException(status_code=503, detail="새 분석 프레임을 아직 사용할 수 없습니다.")
 
 
 @router.get("/snapshot")
@@ -76,8 +83,11 @@ async def analysis_snapshot(site: Site = Depends(require_current_site)):
 
 
 @router.get("/frame")
-async def analysis_frame(site: Site = Depends(require_current_site)):
-    return await _current_frame(site)
+async def analysis_frame(
+    after: int | None = None,
+    site: Site = Depends(require_current_site),
+):
+    return await _current_frame(site, after=after)
 
 
 @router.get("/original-frame")

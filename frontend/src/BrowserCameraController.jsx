@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { WS_URL } from './api'
 
-const FRAME_INTERVAL_MS = 80
+const FRAME_INTERVAL_MS = 67
 const MAX_BUFFERED_BYTES = 300_000
 const UPLOAD_WIDTH = 512
 
