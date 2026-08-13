@@ -18,6 +18,67 @@ from ..services.risk_engine import get_risk_engine, result_to_dict
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
 
+_RAG_EVENT_TERMS = {
+    "no_helmet": "안전모 미착용 개인보호구 착용 점검",
+    "zone_intrusion": "위험구역 침입 출입 통제 접근 방지",
+    "zone_approach": "위험구역 접근 경고 출입 통제",
+    "fall_risk_entry": "추락 위험구역 진입 추락 방지",
+    "fall": "낙상 쓰러짐 사고 예방 응급 대응",
+    "fall_still": "낙상 후 움직임 없음 구조 응급 대응",
+    "sudden_sit": "급작스러운 주저앉음 건강 이상 대응",
+    "stagger": "휘청거림 전도 위험 건강 이상 대응",
+    "heat_fall": "폭염 온열질환 쓰러짐 응급 대응",
+    "heat_fall_still": "폭염 쓰러짐 움직임 없음 응급 구조",
+    "heat_sudden_sit": "폭염 주저앉음 온열질환 대응",
+    "heat_stagger": "폭염 휘청거림 온열질환 예방",
+    "heavy_equipment_entry": "중장비 작업반경 접근 충돌 예방",
+}
+
+
+def _build_rag_query(event_type: str, risk_result: dict) -> str:
+    event_terms = _RAG_EVENT_TERMS.get(event_type, event_type.replace("_", " "))
+    factor_text = " ".join(
+        str(factor.get("description", ""))
+        for factor in risk_result.get("factors", [])
+    )
+    return (
+        f"{event_terms} 위험 대응 안전 수칙 "
+        "예방 점검 작업 절차 관리감독자 교육 보호구 작업중지 비상대응 "
+        f"{factor_text[:500]}"
+    ).strip()
+
+
+def _diversify_chunks(chunks: list, limit: int, per_document: int = 2) -> list:
+    """Prefer multiple documents while preserving similarity order."""
+    if limit <= 0:
+        return []
+
+    selected = []
+    selected_indexes: set[int] = set()
+    per_document_count: dict[int, int] = {}
+
+    # 첫 순회는 문서당 1개, 다음 순회는 문서당 2개를 허용한다.
+    for allowed_per_document in range(1, per_document + 1):
+        for index, chunk in enumerate(chunks):
+            if index in selected_indexes:
+                continue
+            document_id = chunk.document_id
+            if per_document_count.get(document_id, 0) >= allowed_per_document:
+                continue
+            selected.append(chunk)
+            selected_indexes.add(index)
+            per_document_count[document_id] = per_document_count.get(document_id, 0) + 1
+            if len(selected) == limit:
+                return selected
+
+    # 문서가 적으면 남은 유사도 상위 청크로 limit을 채운다.
+    for index, chunk in enumerate(chunks):
+        if index not in selected_indexes:
+            selected.append(chunk)
+            if len(selected) == limit:
+                break
+    return selected
+
 
 @router.get("/config")
 def get_risk_config(site: Site = Depends(require_current_site)):
@@ -183,9 +244,11 @@ def generate_report(
             threshold=RAG_THRESHOLD,
         )
         chunks = retriever.search(
-            query=f"{event_type} 위험 대응 안전 수칙",
+            query=_build_rag_query(event_type, risk_result),
             site_id=site.id,
+            top_k=max(RAG_TOP_K * 3, RAG_TOP_K),
         )
+        chunks = _diversify_chunks(chunks, RAG_TOP_K)
         retrieved = [
             {
                 "chunk_id": c.chunk_id,

@@ -76,6 +76,22 @@ class TestDocumentIndexer(unittest.TestCase):
             chunks = db.query(DocumentChunk).filter_by(document_id=doc_id).all()
             self.assertGreater(len(chunks), 0)
 
+    def test_embedding_failure_does_not_persist_unusable_document(self):
+        with patch.object(self.provider, "encode", side_effect=RuntimeError("model error")):
+            with self.assertRaisesRegex(ValueError, "임베딩 생성에 실패"):
+                self.indexer.index_document(
+                    1,
+                    "실패 문서",
+                    "test",
+                    "1.0",
+                    "안전 지침".encode("utf-8"),
+                    "failed.txt",
+                )
+
+        with self.session_factory() as db:
+            count = db.query(KnowledgeDocument).filter_by(title="실패 문서").count()
+            self.assertEqual(count, 0)
+
     def test_duplicate_version_replaced(self):
         content = "안전 지침 v1".encode("utf-8")
         doc_id1 = self.indexer.index_document(1, "가이드", "test", "1.0", content, "guide.txt")
@@ -129,6 +145,7 @@ class TestKnowledgeRetrieverFallback(unittest.TestCase):
             chunk_size=200,
         )
 
+    @patch("app.config.DATABASE_URL", "postgresql+psycopg://supabase.example/postgres")
     def test_sqlite_search_returns_results(self):
         self.indexer.index_document(
             1, "안전 매뉴얼", "test", "1.0",

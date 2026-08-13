@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import numpy as np
@@ -64,6 +64,21 @@ class EventLogPolicyTests(unittest.TestCase):
         event = EventOut(
             id=1,
             timestamp=datetime(2026, 8, 12, 16, 30, 0),
+            event_type="no_helmet",
+            zone_id=1,
+            snapshot_path=None,
+            confidence=0.9,
+            resolved=False,
+        )
+        self.assertEqual(
+            event.model_dump(mode="json")["timestamp"],
+            "2026-08-12T16:30:00+09:00",
+        )
+
+    def test_utc_event_timestamp_is_converted_to_korean_time(self):
+        event = EventOut(
+            id=1,
+            timestamp=datetime(2026, 8, 12, 7, 30, 0, tzinfo=timezone.utc),
             event_type="no_helmet",
             zone_id=1,
             snapshot_path=None,

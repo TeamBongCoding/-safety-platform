@@ -12,6 +12,7 @@ shapely
 python-dotenv
 pillow
 pgvector
+sentence-transformers
 python-multipart
 pypdf
 openai>=3.0.0,<4.0.0

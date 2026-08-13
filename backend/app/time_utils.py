@@ -27,3 +27,15 @@ def kst_isoformat(value: datetime) -> str:
     else:
         value = value.astimezone(KST)
     return value.isoformat()
+
+
+def utc_naive_to_kst_isoformat(value: datetime) -> str:
+    """Convert UTC-backed database timestamps to explicit Korean time.
+
+    Risk/episode tables historically persist ``datetime.now()`` from the UTC
+    server into timezone-naive columns. Treat those naive values as UTC before
+    converting them, while still handling timezone-aware values correctly.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(KST).isoformat()

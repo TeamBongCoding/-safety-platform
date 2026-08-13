@@ -3,6 +3,7 @@
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -19,6 +20,7 @@ from app.config import (
 from app.database import Base, get_db
 from app.main import app
 from app.models import EventEpisode, LoginSession, Site, User
+from app.routers.risk import _build_rag_query, _diversify_chunks
 from app.auth import hash_password, _token_hash
 
 
@@ -60,6 +62,29 @@ def _make_session_cookie(db, user, days=7):
     db.add(session)
     db.commit()
     return token
+
+
+class TestRagReportHelpers(unittest.TestCase):
+    def test_korean_query_expands_event_and_response_terms(self):
+        query = _build_rag_query(
+            "no_helmet",
+            {"factors": [{"description": "최근 안전모 미착용 증가"}]},
+        )
+        self.assertIn("안전모 미착용", query)
+        self.assertIn("관리감독자 교육", query)
+        self.assertIn("작업중지", query)
+
+    def test_chunk_selection_prefers_different_documents(self):
+        chunks = [
+            SimpleNamespace(document_id=1, name="1-a"),
+            SimpleNamespace(document_id=1, name="1-b"),
+            SimpleNamespace(document_id=1, name="1-c"),
+            SimpleNamespace(document_id=2, name="2-a"),
+            SimpleNamespace(document_id=2, name="2-b"),
+            SimpleNamespace(document_id=3, name="3-a"),
+        ]
+        selected = _diversify_chunks(chunks, limit=4)
+        self.assertEqual([chunk.document_id for chunk in selected], [1, 2, 3, 1])
 
 
 class TestRiskAPIAuth(unittest.TestCase):

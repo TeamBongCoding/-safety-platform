@@ -663,7 +663,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-slate-950/50 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="px-5 py-3 font-medium">발생 시각</th>
+                  <th className="px-5 py-3 font-medium">발생 시각 (KST)</th>
                   <th className="px-5 py-3 font-medium">경고 유형</th>
                   <th className="px-5 py-3 font-medium">감지 ID</th>
                   <th className="px-5 py-3 font-medium">구역</th>
@@ -953,9 +953,11 @@ function EmptyState({ text }) {
 }
 
 function formatDate(value) {
-  const utc = value && !value.endsWith('Z') && !value.includes('+') ? value + 'Z' : value
+  if (!value) return '-'
+  const hasTimeZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+  const timestamp = hasTimeZone ? value : `${value}+09:00`
   return new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(new Date(utc))
+  }).format(new Date(timestamp))
 }

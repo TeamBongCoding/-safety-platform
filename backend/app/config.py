@@ -100,7 +100,7 @@ OPENAI_BASE_URL = (
 )
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT_SEC = float(os.getenv("OPENAI_TIMEOUT_SEC", "60"))
-OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "1800"))
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 # ── Supabase ──────────────────────────────────────────────────────
@@ -111,7 +111,8 @@ SUPABASE_SNAPSHOT_BUCKET = os.getenv("SUPABASE_SNAPSHOT_BUCKET", "event-snapshot
 SUPABASE_CLIP_BUCKET = os.getenv("SUPABASE_CLIP_BUCKET", "event-clips")
 # ── RAG / Embedding ───────────────────────────────────────────────
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
+EMBEDDING_MODEL_REVISION = os.getenv("EMBEDDING_MODEL_REVISION", "")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
-RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.7"))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "8"))
+RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.55"))
 # ──────────────────────────────────────────────────────────────────

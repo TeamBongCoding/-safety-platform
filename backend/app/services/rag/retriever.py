@@ -61,10 +61,17 @@ class KnowledgeRetriever:
         provider = self._provider()
         query_vec = provider.encode_one(query)
 
-        from ...config import DATABASE_URL
-        if DATABASE_URL.startswith("sqlite"):
+        # 운영 설정 문자열이 아니라 실제 주입된 세션의 dialect를 사용한다.
+        # 운영 SessionLocal은 Supabase PostgreSQL/pgvector로, 단위 테스트의
+        # 인메모리 세션은 SQLite/Python cosine fallback으로 정확히 분기된다.
+        with self._session_factory() as db:
+            dialect = db.get_bind().dialect.name
+
+        if dialect == "sqlite":
             return self._search_sqlite(query_vec, site_id, k, thr, embedding_model_filter)
-        return self._search_pgvector(query_vec, site_id, k, thr, embedding_model_filter)
+        if dialect == "postgresql":
+            return self._search_pgvector(query_vec, site_id, k, thr, embedding_model_filter)
+        raise RuntimeError(f"지원하지 않는 RAG 데이터베이스입니다: {dialect}")
 
     # ── PostgreSQL / pgvector ─────────────────────────────────────────────────
 
@@ -76,24 +83,31 @@ class KnowledgeRetriever:
 
         vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
 
-        sql = """
+        where_clauses = ["dc.embedding IS NOT NULL"]
+        params = {"vec": vec_str, "k": top_k}
+        if site_id is not None:
+            where_clauses.append("dc.site_id = :site_id")
+            params["site_id"] = site_id
+        if model_filter:
+            where_clauses.append("dc.embedding_model = :model")
+            params["model"] = model_filter
+        where_sql = "\n              AND ".join(where_clauses)
+
+        sql = f"""
             SELECT
                 dc.id,
                 dc.document_id,
                 kd.title,
                 dc.section,
                 dc.content,
-                1 - (dc.embedding <=> :vec::vector) AS similarity,
+                1 - (dc.embedding <=> CAST(:vec AS vector)) AS similarity,
                 dc.embedding_model
             FROM document_chunks dc
             JOIN knowledge_documents kd ON kd.id = dc.document_id
-            WHERE (:site_id IS NULL OR dc.site_id = :site_id)
-              AND dc.embedding IS NOT NULL
-              AND (:model IS NULL OR dc.embedding_model = :model)
-            ORDER BY dc.embedding <=> :vec::vector
+            WHERE {where_sql}
+            ORDER BY dc.embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """
-        params = {"vec": vec_str, "site_id": site_id, "k": top_k, "model": model_filter}
 
         try:
             with self._session_factory() as db:

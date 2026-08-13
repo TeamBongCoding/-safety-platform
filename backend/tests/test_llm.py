@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from app.services.llm_client import (
     LLMConfig,
     LLMReport,
+    _build_user_prompt,
     call_llm,
     fallback_report,
 )
@@ -25,8 +26,41 @@ _RISK = {
 }
 
 _CHUNKS = [
-    {"chunk_id": 1, "document_id": 10, "title": "안전 매뉴얼", "section": None, "content": "안전모 착용 필수"}
+    {
+        "chunk_id": 1,
+        "document_id": 10,
+        "title": "안전 매뉴얼",
+        "section": None,
+        "content": "안전모 착용 필수",
+        "similarity": 0.91,
+    }
 ]
+
+
+class TestGroundedPrompt(unittest.TestCase):
+    def test_prompt_uses_more_document_content_and_requests_balanced_advice(self):
+        chunks = [
+            {**_CHUNKS[0], "content": "가" * 850 + "현장고유근거"},
+            {
+                "chunk_id": 2,
+                "document_id": 11,
+                "title": "비상 대응서",
+                "section": "초동조치",
+                "content": "작업을 중지하고 관리감독자에게 보고",
+                "similarity": 0.82,
+            },
+        ]
+        prompt = _build_user_prompt(_RISK, chunks)
+
+        self.assertIn("현장고유근거", prompt)
+        self.assertIn("검색된 청크 2개, 문서 2개", prompt)
+        self.assertIn("최소 2개의 서로 다른 청크", prompt)
+        self.assertIn("AI 자율 제안도 1~2개", prompt)
+        self.assertIn("similarity=0.9100", prompt)
+
+    def test_prompt_discloses_when_no_documents_are_retrieved(self):
+        prompt = _build_user_prompt(_RISK, [])
+        self.assertIn("검색된 문서가 없습니다", prompt)
 
 
 class TestFallbackReport(unittest.TestCase):
@@ -119,6 +153,30 @@ class TestCallLLMSuccess(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.risk_level, "high")  # 엔진 값으로 강제
+
+    def test_recommendation_source_builds_trusted_citation(self):
+        client = self._make_client(self._make_report(citations=[]))
+        cfg = LLMConfig(enabled=True, api_key="test-key", timeout_sec=5)
+        with patch("app.services.llm_client.OpenAI", return_value=client):
+            result = call_llm(_RISK, _CHUNKS, config=cfg)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.citations), 1)
+        self.assertEqual(result.citations[0].document_id, 10)
+        self.assertEqual(result.citations[0].title, "안전 매뉴얼")
+
+    def test_invalid_recommendation_source_is_cleared(self):
+        report = self._make_report()
+        report.recommendations[0].source_chunk_id = 9999
+        client = self._make_client(report)
+        cfg = LLMConfig(enabled=True, api_key="test-key", timeout_sec=5)
+        with patch("app.services.llm_client.OpenAI", return_value=client):
+            result = call_llm(_RISK, _CHUNKS, config=cfg)
+
+        self.assertIsNotNone(result)
+        self.assertIsNone(result.recommendations[0].source_chunk_id)
+        self.assertTrue(result.recommendations[0].reason.startswith("[AI 자율 제안]"))
+        self.assertTrue(any("유효한 문서 근거" in item for item in result.limitations))
 
     def test_hallucinated_citation_removed(self):
         """참조되지 않은 chunk_id는 제거한다."""

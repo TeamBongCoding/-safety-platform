@@ -161,5 +161,37 @@ class PoseDetector:
                 logger.debug("Pose detect error: %s", exc)
                 return []
 
+    def detect_batch(self, frames: list[np.ndarray]) -> list[list[tuple[list, np.ndarray]]]:
+        """Run pose inference as a GPU batch for offline evaluation."""
+        if not frames:
+            return []
+        if not self.available:
+            return [[] for _ in frames]
+        with self._lock:
+            try:
+                results = self._model(
+                    frames,
+                    conf=MODEL_CONFIDENCE,
+                    imgsz=MODEL_IMAGE_SIZE,
+                    verbose=False,
+                    batch=len(frames),
+                )
+            except Exception as exc:
+                logger.debug("Pose batch detect error: %s", exc)
+                return [[] for _ in frames]
+
+        batches = []
+        for result in results:
+            out = []
+            if result.keypoints is not None and result.boxes is not None:
+                kps_data = result.keypoints.data.cpu().numpy()
+                boxes_data = result.boxes.xyxy.cpu().numpy()
+                for index in range(len(boxes_data)):
+                    bbox = [float(value) for value in boxes_data[index]]
+                    out.append((bbox, kps_data[index]))
+            batches.append(out)
+        return batches
+
+
 
 pose_detector = PoseDetector()

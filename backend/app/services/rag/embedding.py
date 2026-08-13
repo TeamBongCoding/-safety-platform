@@ -40,9 +40,15 @@ class EmbeddingProvider(ABC):
 class SentenceTransformerProvider(EmbeddingProvider):
     """sentence-transformers 기반 실제 임베딩 프로바이더 (lazy loading)."""
 
-    def __init__(self, model_name: str = "BAAI/bge-m3", dimension: int = 1024):
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-m3",
+        dimension: int = 1024,
+        revision: str | None = None,
+    ):
         self._model_name = model_name
         self._dimension = dimension
+        self._revision = revision
         self._model = None
 
     @property
@@ -61,7 +67,11 @@ class SentenceTransformerProvider(EmbeddingProvider):
             hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
             cache_dir = os.path.join(hf_home, "sentence_transformers")
             logger.info("Loading embedding model %s from %s", self._model_name, cache_dir)
-            self._model = SentenceTransformer(self._model_name, cache_folder=cache_dir)
+            self._model = SentenceTransformer(
+                self._model_name,
+                cache_folder=cache_dir,
+                revision=self._revision,
+            )
             logger.info("Embedding model loaded: dim=%d", self._dimension)
         except ImportError as exc:
             raise RuntimeError(
@@ -107,8 +117,12 @@ def get_embedding_provider() -> EmbeddingProvider:
     """싱글톤 EmbeddingProvider를 반환한다. 테스트에서는 set_provider()로 교체 가능."""
     global _provider
     if _provider is None:
-        from ...config import EMBEDDING_DIM, EMBEDDING_MODEL_NAME
-        _provider = SentenceTransformerProvider(EMBEDDING_MODEL_NAME, EMBEDDING_DIM)
+        from ...config import EMBEDDING_DIM, EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_REVISION
+        _provider = SentenceTransformerProvider(
+            EMBEDDING_MODEL_NAME,
+            EMBEDDING_DIM,
+            revision=EMBEDDING_MODEL_REVISION or None,
+        )
     return _provider
 
 

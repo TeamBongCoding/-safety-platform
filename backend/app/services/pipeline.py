@@ -26,18 +26,20 @@ def process_frame(
     heat_status=None,
     heat_exposure_tracker=None,
     pose_detections=None,
+    timestamp=None,
+    render_overlay=True,
 ):
     persons = [d for d in detections if d["cls"] == "person"]
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
     uncovered_heads = [d["box"] for d in detections if d["cls"] == "no-helmet"]
-    tracks = tracker.update(frame, persons, w, h)
+    now = time.monotonic() if timestamp is None else timestamp
+    tracks = tracker.update(frame, persons, w, h, timestamp=now)
 
     heat_level = heat_status.level if heat_status is not None else "inactive"
     sun_threshold = heat_status.sun_threshold if heat_status is not None else 1.15
     shade_threshold = heat_status.shade_threshold if heat_status is not None else 0.85
     do_shade = is_outdoor and heat_level != "inactive"
     frame_avg = frame_avg_brightness(frame) if do_shade else None
-    now = time.monotonic()
 
     events = []
     workers = []
@@ -82,22 +84,23 @@ def process_frame(
         behavior_state = behavior_result.state if behavior_result else BehaviorState.NORMAL
         behavior_debug = behavior_result.debug if behavior_result else None
 
-        frame = draw_status(
-            frame,
-            track.box,
-            helmet_on,
-            zone_label,
-            level,
-            track.track_id,
-            in_heat_zone=in_heat_zone,
-            heat_seconds=heat_seconds,
-            helmet_violation=helmet_violation,
-            behavior_state=behavior_state,
-            behavior_heat_related=(
-                in_heat_zone and behavior_state != BehaviorState.NORMAL
-            ),
-            behavior_debug=behavior_debug,
-        )
+        if render_overlay:
+            frame = draw_status(
+                frame,
+                track.box,
+                helmet_on,
+                zone_label,
+                level,
+                track.track_id,
+                in_heat_zone=in_heat_zone,
+                heat_seconds=heat_seconds,
+                helmet_violation=helmet_violation,
+                behavior_state=behavior_state,
+                behavior_heat_related=(
+                    in_heat_zone and behavior_state != BehaviorState.NORMAL
+                ),
+                behavior_debug=behavior_debug,
+            )
 
         if behavior_result is not None and behavior_result.state != BehaviorState.NORMAL:
             event_type = behavior_event_type(behavior_result.state, in_heat_zone)
@@ -146,7 +149,7 @@ def process_frame(
             "behavior_risk_score": behavior_result.risk_score if behavior_result else 0,
         })
 
-    if pose_detections:
+    if render_overlay and pose_detections:
         frame = draw_pose_skeleton(frame, pose_detections)
 
     if include_status:

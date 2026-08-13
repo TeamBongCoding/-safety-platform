@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic import field_serializer, field_validator
 
-from .time_utils import kst_isoformat
+from .time_utils import kst_isoformat, utc_naive_to_kst_isoformat
 
 
 class SignupRequest(BaseModel):
@@ -168,7 +168,7 @@ class EpisodeOut(BaseModel):
 
     @field_serializer("started_at", "ended_at", "created_at", "updated_at")
     def serialize_dt(self, value: datetime | None) -> str | None:
-        return kst_isoformat(value) if value else None
+        return utc_naive_to_kst_isoformat(value) if value else None
 
     class Config:
         from_attributes = True
@@ -205,7 +205,7 @@ class RiskResultOut(BaseModel):
 
     @field_serializer("generated_at")
     def serialize_dt(self, value: datetime) -> str:
-        return kst_isoformat(value)
+        return utc_naive_to_kst_isoformat(value)
 
 
 class RiskOverviewOut(BaseModel):
@@ -217,7 +217,7 @@ class RiskOverviewOut(BaseModel):
 
     @field_serializer("generated_at")
     def serialize_dt(self, value: datetime) -> str:
-        return kst_isoformat(value)
+        return utc_naive_to_kst_isoformat(value)
 
 
 class RiskReportOut(BaseModel):
@@ -233,7 +233,7 @@ class RiskReportOut(BaseModel):
 
     @field_serializer("generated_at")
     def serialize_dt(self, value: datetime) -> str:
-        return kst_isoformat(value)
+        return utc_naive_to_kst_isoformat(value)
 
     class Config:
         from_attributes = True

@@ -148,7 +148,9 @@ class DocumentIndexer:
                 embeddings = provider.encode(chunks)
             except Exception as exc:
                 logger.error("임베딩 생성 실패: %s", exc)
-                embeddings = [None] * len(chunks)
+                raise ValueError(
+                    "문서 임베딩 생성에 실패했습니다. 모델 설정과 서버 로그를 확인하세요."
+                ) from exc
 
             for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                 db_chunk = DocumentChunk(

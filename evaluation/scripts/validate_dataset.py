@@ -207,6 +207,23 @@ def read_video_metadata(path: Path) -> tuple[float, float, int, int] | None:
     return duration, fps, width, height
 
 
+def resolve_video_path(row: dict[str, str]) -> Path | None:
+    """정답표 파일명과 C001 접두사가 붙은 촬영 파일명을 모두 지원한다."""
+    clip_id = row["clip_id"]
+    file_name = row["file_name"]
+    candidates = [
+        VIDEO_DIR / file_name,
+        VIDEO_DIR / f"{clip_id}{file_name}",
+        VIDEO_DIR / f"{clip_id}_{file_name}",
+        VIDEO_DIR / f"{clip_id}-{file_name}",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    matches = sorted(VIDEO_DIR.glob(f"{clip_id}*.mp4"))
+    return matches[0] if len(matches) == 1 else None
+
+
 def validate_videos(
     rows: list[dict[str, str]],
     require_videos: bool,
@@ -218,8 +235,8 @@ def validate_videos(
     opencv_unavailable = False
 
     for row in rows:
-        path = VIDEO_DIR / row["file_name"]
-        if not path.is_file():
+        path = resolve_video_path(row)
+        if path is None:
             missing.append(row["file_name"])
             continue
 

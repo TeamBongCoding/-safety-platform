@@ -22,6 +22,47 @@ class Detector:
         with self._lock:
             return self._detect(frame)
 
+    def detect_batch(self, frames):
+        """Run both YOLO models over a frame batch for offline evaluation."""
+        if not frames:
+            return []
+        with self._lock:
+            helmet_results = self.helmet_model(
+                frames,
+                conf=MODEL_CONFIDENCE,
+                batch=len(frames),
+                imgsz=MODEL_IMAGE_SIZE,
+                verbose=False,
+            )
+            person_results = self.person_model(
+                frames,
+                conf=MODEL_CONFIDENCE,
+                classes=[0],
+                batch=len(frames),
+                imgsz=MODEL_IMAGE_SIZE,
+                verbose=False,
+            )
+
+        batches = []
+        for helmet_result, person_result in zip(helmet_results, person_results):
+            out = []
+            for box in helmet_result.boxes:
+                raw = helmet_result.names[int(box.cls)]
+                if raw in ("head", "helmet"):
+                    out.append({
+                        "cls": {"head": "no-helmet"}.get(raw, raw),
+                        "conf": float(box.conf),
+                        "box": [float(value) for value in box.xyxy[0]],
+                    })
+            for box in person_result.boxes:
+                out.append({
+                    "cls": "person",
+                    "conf": float(box.conf),
+                    "box": [float(value) for value in box.xyxy[0]],
+                })
+            batches.append(out)
+        return batches
+
     def _detect(self, frame):
         out = []
         r1 = self.helmet_model(
