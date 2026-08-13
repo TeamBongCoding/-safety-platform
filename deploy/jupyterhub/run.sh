@@ -8,12 +8,10 @@ PYTHON_BIN="$PROJECT_ROOT/backend/.venv/bin/python"
 ENV_FILE="$PROJECT_ROOT/.env"
 APP_PID=""
 TUNNEL_PID=""
-LLM_PID=""
 
 cleanup() {
   trap - EXIT INT TERM
   [[ -n "$TUNNEL_PID" ]] && kill -TERM "$TUNNEL_PID" 2>/dev/null || true
-  [[ -n "$LLM_PID"    ]] && kill -TERM "$LLM_PID"    2>/dev/null || true
   [[ -n "$APP_PID"    ]] && kill -TERM "$APP_PID"     2>/dev/null || true
   wait 2>/dev/null || true
 }
@@ -59,39 +57,6 @@ TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-$(dotenv_value CLOUDFLARE_TUNNEL_TOKEN)
 if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   echo "[run] PORT는 1~65535 범위의 숫자여야 합니다: $PORT" >&2
   exit 1
-fi
-
-LLM_ENABLED="${LOCAL_LLM_ENABLED:-$(dotenv_value LOCAL_LLM_ENABLED)}"
-LLM_PORT="${LOCAL_LLM_BASE_URL:-$(dotenv_value LOCAL_LLM_BASE_URL)}"
-LLM_PORT="${LLM_PORT##*:}"  # 마지막 콜론 이후 = 포트+경로
-LLM_PORT="${LLM_PORT%%/*}"  # 경로 제거
-
-if [[ "${LLM_ENABLED:-0}" == "1" ]]; then
-  LLM_MODEL="${LOCAL_LLM_MODEL:-$(dotenv_value LOCAL_LLM_MODEL)}"
-  LLM_MODEL="${LLM_MODEL:-Qwen/Qwen3-4B}"
-  LLM_PORT="${LLM_PORT:-8001}"
-  echo "[run] Local LLM 시작: 포트 $LLM_PORT, 모델 $LLM_MODEL"
-  # vLLM 우선 (HF 모델 ID 직접 지원), llama-cpp-python은 .gguf 파일 경로 필요
-  if "$PYTHON_BIN" -c "import vllm" 2>/dev/null; then
-    "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
-      --model "$LLM_MODEL" \
-      --port "$LLM_PORT" &
-    LLM_PID="$!"
-  elif "$PYTHON_BIN" -c "import llama_cpp" 2>/dev/null; then
-    if [[ "$LLM_MODEL" != *.gguf ]]; then
-      echo "[run] llama-cpp-python은 .gguf 파일 경로가 필요합니다 (HF ID 불가): $LLM_MODEL" >&2
-      echo "[run] LOCAL_LLM_MODEL에 .gguf 파일 경로를 지정하거나 vllm을 설치하세요." >&2
-    else
-      "$PYTHON_BIN" -m llama_cpp.server \
-        --model "$LLM_MODEL" \
-        --port "$LLM_PORT" \
-        --n_gpu_layers -1 \
-        --chat_format chatml &
-      LLM_PID="$!"
-    fi
-  else
-    echo "[run] llama-cpp-python 또는 vllm이 설치되어 있지 않습니다. LLM을 건너뜁니다." >&2
-  fi
 fi
 
 echo "[run] FastAPI 시작: http://127.0.0.1:$PORT"
@@ -144,7 +109,6 @@ fi
 TUNNEL_PID=$!
 
 set +e
-# LLM은 선택적 서비스라 죽어도 전체 서버를 종료하지 않음
 wait -n "$APP_PID" "$TUNNEL_PID"
 status=$?
 set -e

@@ -10,6 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.database as db_module
+from app.config import (
+    RISK_LONG_WINDOW_MINUTES,
+    RISK_REFRESH_SECONDS,
+    RISK_SHORT_WINDOW_MINUTES,
+    RISK_WINDOW_MODE,
+)
 from app.database import Base, get_db
 from app.main import app
 from app.models import EventEpisode, LoginSession, Site, User
@@ -94,6 +100,21 @@ class TestRiskAPIAuth(unittest.TestCase):
         )
         # With no episode data, may return 200 or 404
         self.assertIn(resp.status_code, (200, 404))
+
+    def test_risk_config_matches_environment(self):
+        resp = self.client.get(
+            "/api/risk/config",
+            cookies={"safety_session": self.token},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["mode"], RISK_WINDOW_MODE)
+        self.assertEqual(data["refresh_seconds"], RISK_REFRESH_SECONDS)
+        self.assertEqual([item["value"] for item in data["options"]], ["24h", "7d"])
+        expected_labels = (
+            [f"{RISK_SHORT_WINDOW_MINUTES}분", f"{RISK_LONG_WINDOW_MINUTES}분"]
+            if RISK_WINDOW_MODE == "demo" else ["24시간", "7일"]
+        )
 
     def test_unauthenticated_episodes_rejected(self):
         resp = self.client.get("/api/events/episodes")

@@ -46,7 +46,50 @@ bash deploy/jupyterhub/install.sh
 bash deploy/jupyterhub/service.sh start
 ```
 
+## OpenAI 위험 보고서 설정
+
+위험 예측 보고서는 해커톤 제공 SDK 중 공식 `openai` Python SDK를 사용합니다. 로컬 LLM
+서버는 필요하지 않습니다. 루트 `.env`에 발급받은 API 키와 사용할 모델을 설정하세요.
+
+```dotenv
+OPENAI_ENABLED=1
+OPENAI_API_KEY=발급받은_API_키
+OPENAI_MODEL=gpt-4o-mini
+```
+
+해커톤에서 별도 OpenAI-compatible gateway를 제공한 경우에만 다음 값도 추가합니다.
+
+```dotenv
+OPENAI_BASE_URL=https://제공받은-gateway.example/v1
+```
+
+설정 후 백엔드를 재시작하면 `/health` 응답의 `llm_provider`가 `openai`로 표시됩니다.
+API 키가 없거나 OpenAI 호출이 실패하면 위험 등급 계산은 중단되지 않고, 기존 Risk Engine
+결과로 만든 수치 기반 보고서가 반환됩니다. API 키는 `.env`에만 저장하고 Git에 커밋하지
+마세요.
+
 `REID_DEVICE=auto`는 CUDA가 있으면 GPU를 사용하고, 없으면 CPU를 사용합니다.
+
+### 해커톤 데모용 위험 시간축
+
+데모에서는 실제 저장된 사건을 기준으로 최근 `1분`과 `5분` 추세를 보여 주며, 현황 화면이
+5초마다 자동 갱신됩니다. API 호환성을 위해 요청 값은 기존 `24h`, `7d`를 유지하고 화면
+라벨과 계산 구간만 다음 설정으로 매핑합니다.
+
+```dotenv
+RISK_WINDOW_MODE=demo
+RISK_REFRESH_SECONDS=5
+RISK_SHORT_WINDOW_MINUTES=1
+RISK_LONG_WINDOW_MINUTES=5
+```
+
+운영용 시간축으로 되돌릴 때는 다음처럼 바꾸고 백엔드를 재시작합니다.
+
+```dotenv
+RISK_WINDOW_MODE=production
+```
+
+AI 보고서는 버튼을 눌렀을 때만 생성되므로 자동 갱신 중 OpenAI API가 반복 호출되지 않습니다.
 
 ## 카메라 간 ID 연결 사용법
 

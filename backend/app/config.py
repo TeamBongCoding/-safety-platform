@@ -79,16 +79,30 @@ HEAT_BEHAVIOR_COOLDOWN_SEC = float(os.getenv("HEAT_BEHAVIOR_COOLDOWN_SEC", "15.0
 EVENT_EPISODE_CLOSE_GAP_SEC = float(os.getenv("EVENT_EPISODE_CLOSE_GAP_SEC", "30"))
 EVENT_EPISODE_MIN_DURATION_SEC = float(os.getenv("EVENT_EPISODE_MIN_DURATION_SEC", "2"))
 EVENT_EPISODE_UPDATE_INTERVAL_SEC = float(os.getenv("EVENT_EPISODE_UPDATE_INTERVAL_SEC", "10"))
+# ── Risk 추세 시간축 ────────────────────────────────────────────
+RISK_WINDOW_MODE = os.getenv("RISK_WINDOW_MODE", "production").strip().lower()
+if RISK_WINDOW_MODE not in {"production", "demo"}:
+    RISK_WINDOW_MODE = "production"
+RISK_REFRESH_SECONDS = max(1, int(os.getenv("RISK_REFRESH_SECONDS", "60")))
+RISK_SHORT_WINDOW_MINUTES = max(1, int(os.getenv("RISK_SHORT_WINDOW_MINUTES", "1")))
+RISK_LONG_WINDOW_MINUTES = max(
+    RISK_SHORT_WINDOW_MINUTES,
+    int(os.getenv("RISK_LONG_WINDOW_MINUTES", "5")),
+)
 MODEL_VERSION = os.getenv("MODEL_VERSION", "1.0")
 RULE_VERSION = os.getenv("RULE_VERSION", "1.0")
-# ── 로컬 LLM ─────────────────────────────────────────────────────
-LOCAL_LLM_ENABLED = os.getenv("LOCAL_LLM_ENABLED", "0") == "1"
-LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8001/v1")
-LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "Qwen/Qwen3-4B")
-LOCAL_LLM_TIMEOUT_SEC = float(os.getenv("LOCAL_LLM_TIMEOUT_SEC", "60"))
-LOCAL_LLM_MAX_TOKENS = int(os.getenv("LOCAL_LLM_MAX_TOKENS", "1000"))
-LOCAL_LLM_TEMPERATURE = float(os.getenv("LOCAL_LLM_TEMPERATURE", "0.1"))
-LOCAL_LLM_REQUIRE_SUCCESS = os.getenv("LOCAL_LLM_REQUIRE_SUCCESS", "0") == "1"
+# ── OpenAI LLM ───────────────────────────────────────────────────
+OPENAI_ENABLED = os.getenv("OPENAI_ENABLED", "0") == "1"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# 해커톤에서 별도 OpenAI-compatible gateway를 제공할 때만 설정한다.
+OPENAI_BASE_URL = (
+    os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT_SEC = float(os.getenv("OPENAI_TIMEOUT_SEC", "60"))
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 # ── Supabase ──────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")

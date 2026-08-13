@@ -106,7 +106,35 @@ cd ..
 `.env`는 Git에서 제외되므로 `git pull`을 해도 유지됩니다. GPU가 있으면 `REID_DEVICE=auto`가
 자동으로 CUDA를 선택합니다.
 
+위험 보고서의 LLM 설명을 켜려면 로컬 모델을 설치하는 대신 해커톤에서 제공하는 `openai`
+SDK와 API 키를 사용합니다. 루트 `.env`에 다음 값을 입력하세요.
+
+```dotenv
+OPENAI_ENABLED=1
+OPENAI_API_KEY=발급받은_API_키
+OPENAI_MODEL=gpt-4o-mini
+```
+
+운영진이 별도 OpenAI-compatible gateway를 안내한 경우에만 `OPENAI_BASE_URL`도 설정합니다.
+API 키는 저장소나 메신저에 올리지 마세요. 값 변경 후 서비스를 재시작합니다.
+
+```bash
+bash deploy/jupyterhub/service.sh restart
+```
+
 ## 6. 외부 데모 시작
+해커톤 시연에서는 위험 추세가 즉시 변하도록 같은 `.env`에 아래 설정을 사용합니다.
+
+
+```dotenv
+RISK_WINDOW_MODE=demo
+RISK_REFRESH_SECONDS=5
+RISK_SHORT_WINDOW_MINUTES=1
+RISK_LONG_WINDOW_MINUTES=5
+```
+
+이 설정은 실제 저장된 사건의 최근 1분/5분 추세를 5초마다 갱신합니다. 운영 배포에서 원래
+24시간/7일 구간을 사용하려면 `RISK_WINDOW_MODE=production`으로 변경하고 재시작하세요.
 
 ```bash
 bash deploy/jupyterhub/service.sh start
@@ -204,6 +232,7 @@ git ls-remote origin
 | URL은 열리지만 로그인 유지 안 됨 | `.env`의 `COOKIE_SECURE=1` 확인 후 서비스 재시작 |
 | 카메라 권한이 거부됨 | 반드시 cloudflared의 HTTPS URL로 접속하고 브라우저 사이트 권한 재설정 |
 | AI 분석이 시작되지 않음 | `ANALYSIS_ENABLED`, 모델 경로, `nvidia-smi`, 서비스 로그 확인 |
+| LLM 설명 대신 기본 보고서가 표시됨 | `OPENAI_ENABLED=1`, `OPENAI_API_KEY`, `OPENAI_MODEL`과 서비스 로그 확인 |
 | `update.sh`가 변경 파일 때문에 중단됨 | 배포 계정에서 직접 수정하지 말고 개인 계정에서 commit/push; 필요한 배포 전용 값은 `.env`에만 저장 |
 | `git pull` 인증 실패 | 위 GitHub 인증 절차를 사용하고 `gh auth status`로 캐시 상태 확인 |
 

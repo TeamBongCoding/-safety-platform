@@ -72,6 +72,7 @@ class RiskFactor:
 class RiskResult:
     event_type: str
     horizon: str          # "24h" | "7d"
+    window_label: str     # display label, e.g. "1분" | "24시간"
     risk_score: float     # 0–100
     risk_level: str       # low | medium | high | critical
     baseline_rate: float  # episodes per 100 worker-hours (or per day)
@@ -106,10 +107,47 @@ class RiskModel(ABC):
 # ── Deterministic rule-based implementation ───────────────────────────────────
 
 class RuleBasedRiskEngine(RiskModel):
-    """Deterministic risk scoring based on episode frequency trends."""
+    """Deterministic risk scoring based on episode frequency trends.
 
-    def __init__(self, model_version: str = "rule/1.0"):
+    API horizon values stay compatible while demo mode maps them to minutes.
+    """
+
+    def __init__(
+        self,
+        model_version: str = "rule/1.1",
+        window_mode: str = "production",
+        short_window_minutes: int = 1,
+        long_window_minutes: int = 5,
+    ):
         self._model_version = model_version
+        self._window_mode = window_mode if window_mode in {"production", "demo"} else "production"
+        self._short_window_minutes = max(1, short_window_minutes)
+        self._long_window_minutes = max(self._short_window_minutes, long_window_minutes)
+
+    def window_options(self) -> list[dict[str, str]]:
+        if self._window_mode == "demo":
+            return [
+                {"value": "24h", "label": f"{self._short_window_minutes}분"},
+                {"value": "7d", "label": f"{self._long_window_minutes}분"},
+            ]
+        return [
+            {"value": "24h", "label": "24시간"},
+            {"value": "7d", "label": "7일"},
+        ]
+
+    @property
+    def window_mode(self) -> str:
+        return self._window_mode
+
+    def _window(self, horizon: str) -> tuple[timedelta, str]:
+        if horizon not in {"24h", "7d"}:
+            raise ValueError("horizon must be 24h or 7d")
+        if self._window_mode == "demo":
+            minutes = self._short_window_minutes if horizon == "24h" else self._long_window_minutes
+            return timedelta(minutes=minutes), f"{minutes}분"
+        if horizon == "24h":
+            return timedelta(days=1), "24시간"
+        return timedelta(days=7), "7일"
 
     def predict(
         self,
@@ -119,7 +157,7 @@ class RuleBasedRiskEngine(RiskModel):
         event_types: list[str] | None = None,
         zone_id: int | None = None,
     ) -> list[RiskResult]:
-        from ..models import EventEpisode, ExposureHourly
+        from ..models import EventEpisode
 
         now = datetime.now()
         results: list[RiskResult] = []
@@ -133,7 +171,9 @@ class RuleBasedRiskEngine(RiskModel):
             ).scalars().all()
             event_types = list(rows) or ["no_helmet"]
 
-        # Fetch worker-hours for normalization
+        # Production uses a 28-day worker-hour average for normalization.
+        # Minute-scale demo windows use counts/minute because hourly exposure
+        # buckets cannot accurately represent a one-minute interval.
         worker_hours = self._get_worker_hours(db, site_id, days=28)
 
         for et in event_types:
@@ -161,10 +201,13 @@ class RuleBasedRiskEngine(RiskModel):
         limitations: list[str] = []
         factors: list[RiskFactor] = []
 
-        # ── Fetch episode counts across windows ───────────────────────────────
-        def count_episodes(days_ago: int, days_end: int = 0) -> int:
-            start = now - timedelta(days=days_ago)
-            end = now - timedelta(days=days_end)
+        # ── Selected window vs the immediately preceding equal window ─────────
+        window, window_label = self._window(horizon)
+        recent_start = now - window
+        baseline_start = recent_start - window
+        history_start = now - window * 4
+
+        def count_episodes(start: datetime, end: datetime) -> int:
             q = select(func.count(EventEpisode.id)).where(
                 EventEpisode.site_id == site_id,
                 EventEpisode.event_type == event_type,
@@ -175,31 +218,33 @@ class RuleBasedRiskEngine(RiskModel):
                 q = q.where(EventEpisode.zone_id == zone_id)
             return db.scalar(q) or 0
 
-        n_1d  = count_episodes(1)
-        n_7d  = count_episodes(7)
-        n_28d = count_episodes(28)
-        # Prior period baselines (for change %)
-        n_prev_1d  = count_episodes(2, 1)
-        n_prev_7d  = count_episodes(14, 7)
-        n_prev_28d = count_episodes(56, 28)
-
-        total_episodes = n_28d
+        recent_count = count_episodes(recent_start, now)
+        baseline_count = count_episodes(baseline_start, recent_start)
+        history_count = count_episodes(history_start, now)
+        total_episodes = history_count
 
         # ── Rate calculation ──────────────────────────────────────────────────
-        if worker_hours_28d >= 1.0:
-            rate_norm = 100.0 / worker_hours_28d
-            recent_rate  = n_7d  * (100.0 / max(worker_hours_28d * 7 / 28, 1e-3))
-            baseline_rate = n_prev_7d * (100.0 / max(worker_hours_28d * 7 / 28, 1e-3))
+        window_days = window.total_seconds() / 86400.0
+        if self._window_mode == "production" and worker_hours_28d >= 1.0:
+            estimated_window_hours = max(worker_hours_28d * window_days / 28.0, 1e-3)
+            recent_rate = recent_count * 100.0 / estimated_window_hours
+            baseline_rate = baseline_count * 100.0 / estimated_window_hours
             rate_unit = "per 100 worker-hours"
         else:
-            # Fallback: per-day rate
-            recent_rate   = n_7d  / 7.0
-            baseline_rate = n_prev_7d / 7.0
-            rate_unit = "per day"
-            limitations.append(
-                "worker-hours 데이터가 부족하여 일 단위 발생 건수로 대체했습니다. "
-                "신뢰도가 낮을 수 있습니다."
-            )
+            if self._window_mode == "demo":
+                window_minutes = window.total_seconds() / 60.0
+                recent_rate = recent_count / window_minutes
+                baseline_rate = baseline_count / window_minutes
+                rate_unit = "per minute"
+                limitations.append("데모 모드에서는 시간당 노출량 대신 분당 사건 수를 사용합니다.")
+            else:
+                recent_rate = recent_count / window_days
+                baseline_rate = baseline_count / window_days
+                rate_unit = "per day"
+                limitations.append(
+                    "worker-hours 데이터가 부족하여 일 단위 발생 건수로 대체했습니다. "
+                    "신뢰도가 낮을 수 있습니다."
+                )
 
         # ── Change percent ────────────────────────────────────────────────────
         if baseline_rate > 0:
@@ -226,14 +271,16 @@ class RuleBasedRiskEngine(RiskModel):
             factors.append(RiskFactor(
                 metric="rate_ratio",
                 value=round(ratio, 2),
-                description=f"최근 7일 발생률이 직전 7일 대비 {abs(change_pct):.0f}% {'증가' if change_pct > 0 else '감소'}했습니다.",
+                description=f"최근 {window_label} 발생률이 직전 {window_label} 대비 {abs(change_pct):.0f}% {'증가' if change_pct > 0 else '감소'}했습니다.",
                 weight=50.0,
             ))
 
         # 2) EWMA recency score (0~20)
-        if n_28d > 0:
-            ewma_ratio = (EWMA_ALPHA * (n_7d / 7) + (1 - EWMA_ALPHA) * (n_28d / 28))
-            ewma_baseline = n_28d / 28
+        if history_count > 0:
+            recent_window_rate = float(recent_count)
+            history_window_rate = history_count / 4.0
+            ewma_ratio = EWMA_ALPHA * recent_window_rate + (1 - EWMA_ALPHA) * history_window_rate
+            ewma_baseline = history_window_rate
             ewma_score = min(20.0, (ewma_ratio / max(ewma_baseline, 1e-6)) * 10.0) if ewma_baseline > 0 else 0.0
         else:
             ewma_score = 0.0
@@ -241,7 +288,7 @@ class RuleBasedRiskEngine(RiskModel):
         factors.append(RiskFactor(
             metric="ewma_recency",
             value=round(ewma_score, 1),
-            description=f"최근 28일 내 총 {n_28d}건, 최근 7일 {n_7d}건 발생.",
+            description=f"최근 4개 구간({window_label} × 4) 내 총 {history_count}건, 현재 구간 {recent_count}건 발생.",
         ))
 
         # 3) Unresolved episodes score (0~15)
@@ -255,7 +302,7 @@ class RuleBasedRiskEngine(RiskModel):
             ))
 
         # 4) Severity score (0~10)
-        severity_score = self._severity_score(db, site_id, event_type, zone_id, now)
+        severity_score = self._severity_score(db, site_id, event_type, zone_id, recent_start)
         if severity_score > 0:
             factors.append(RiskFactor(
                 metric="severity_weight",
@@ -264,7 +311,7 @@ class RuleBasedRiskEngine(RiskModel):
             ))
 
         # 5) Zone concentration score (0~5)
-        zone_score = self._zone_concentration_score(db, site_id, event_type, now) if zone_id is None else 0.0
+        zone_score = self._zone_concentration_score(db, site_id, event_type, recent_start) if zone_id is None else 0.0
         if zone_score > 0:
             factors.append(RiskFactor(
                 metric="zone_concentration",
@@ -279,17 +326,18 @@ class RuleBasedRiskEngine(RiskModel):
         confidence_level = self._confidence(total_episodes, worker_hours_28d)
 
         if total_episodes == 0:
-            limitations.append("분석 기간(28일) 내 사건이 없어 기준 위험도를 계산할 수 없습니다.")
+            limitations.append(f"분석 기간({window_label} × 4) 내 사건이 없어 기준 위험도를 계산할 수 없습니다.")
         elif total_episodes < 3:
             limitations.append(f"표본이 {total_episodes}건으로 적어 통계적 신뢰도가 낮습니다.")
 
         factors.append(RiskFactor(
             metric="sample_count",
             value=float(total_episodes),
-            description=f"최근 28일 누적 사건 수 {total_episodes}건 ({rate_unit}).",
+            description=f"최근 4개 구간 누적 사건 수 {total_episodes}건 ({rate_unit}).",
         ))
 
         return RiskResult(
+            window_label=window_label,
             event_type=event_type,
             horizon=horizon,
             risk_score=risk_score,
@@ -328,9 +376,8 @@ class RuleBasedRiskEngine(RiskModel):
             q = q.where(EventEpisode.zone_id == zone_id)
         return db.scalar(q) or 0
 
-    def _severity_score(self, db: Session, site_id, event_type, zone_id, now: datetime) -> float:
+    def _severity_score(self, db: Session, site_id, event_type, zone_id, cutoff: datetime) -> float:
         from ..models import EventEpisode
-        cutoff = now - timedelta(days=28)
         q = select(EventEpisode.severity).where(
             EventEpisode.site_id == site_id,
             EventEpisode.event_type == event_type,
@@ -345,9 +392,8 @@ class RuleBasedRiskEngine(RiskModel):
         avg_weight = total_weight / len(severities)
         return min(10.0, (avg_weight - 1.0) * 10.0)
 
-    def _zone_concentration_score(self, db: Session, site_id, event_type, now: datetime) -> float:
+    def _zone_concentration_score(self, db: Session, site_id, event_type, cutoff: datetime) -> float:
         from ..models import EventEpisode
-        cutoff = now - timedelta(days=28)
         rows = db.execute(
             select(EventEpisode.zone_id, func.count(EventEpisode.id).label("cnt")).where(
                 EventEpisode.site_id == site_id,
@@ -383,8 +429,19 @@ def score_to_level(score: float) -> str:
     return "low"
 
 
-# Singleton
-_engine = RuleBasedRiskEngine()
+# Singleton configured for the running application. Tests that instantiate the
+# engine directly keep production defaults.
+from ..config import (  # noqa: E402
+    RISK_LONG_WINDOW_MINUTES,
+    RISK_SHORT_WINDOW_MINUTES,
+    RISK_WINDOW_MODE,
+)
+
+_engine = RuleBasedRiskEngine(
+    window_mode=RISK_WINDOW_MODE,
+    short_window_minutes=RISK_SHORT_WINDOW_MINUTES,
+    long_window_minutes=RISK_LONG_WINDOW_MINUTES,
+)
 
 
 def get_risk_engine() -> RuleBasedRiskEngine:
@@ -398,6 +455,7 @@ def result_to_dict(r: RiskResult) -> dict:
         "risk_score": r.risk_score,
         "risk_level": r.risk_level,
         "baseline_rate": r.baseline_rate,
+        "window_label": r.window_label,
         "recent_rate": r.recent_rate,
         "change_percent": r.change_percent,
         "confidence_level": r.confidence_level,

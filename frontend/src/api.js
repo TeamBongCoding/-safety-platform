@@ -63,6 +63,10 @@ export async function api(path, options = {}) {
 export function fetchRiskOverview(horizon = '24h') {
   return api(`/api/risk/overview?horizon=${horizon}`)
 }
+export function fetchRiskConfig() {
+  return api('/api/risk/config')
+}
+
 
 export function generateRiskReport(horizon = '7d', eventType = 'no_helmet') {
   return api(`/api/risk/reports/generate?horizon=${horizon}&event_type=${eventType}`, { method: 'POST' })

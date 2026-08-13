@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchRiskOverview, generateRiskReport, fetchLatestReport, fetchEpisodes, resolveEpisode, fetchDocuments, deleteDocument, uploadDocument } from './api'
+import { fetchRiskConfig, fetchRiskOverview, generateRiskReport, fetchLatestReport, fetchEpisodes, resolveEpisode, fetchDocuments, deleteDocument, uploadDocument } from './api'
 
 const RISK_LEVEL_STYLE = {
   low:      { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
@@ -16,6 +16,12 @@ const EVENT_LABELS = {
   heavy_equipment_entry: '중장비 작업반경', stagger: '휘청거림',
   sudden_sit: '주저앉음', heat_fall: '폭염 쓰러짐', heat_stagger: '폭염 휘청거림',
 }
+const DEFAULT_RISK_CONFIG = {
+  mode: 'production',
+  refresh_seconds: 60,
+  options: [{ value: '24h', label: '24시간' }, { value: '7d', label: '7일' }],
+}
+
 
 function eventLabel(type) { return EVENT_LABELS[type] || type }
 
@@ -45,40 +51,52 @@ function ScoreBar({ score, level }) {
 
 // ── Overview Tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ onError }) {
+function OverviewTab({ onError, riskConfig }) {
   const [horizon, setHorizon] = useState('24h')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true)
     try {
       const result = await fetchRiskOverview(horizon)
       setData(result)
     } catch (err) {
       if (err.status !== 404) onError(err.message)
-      setData(null)
+      if (showLoading) setData(null)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }, [horizon, onError])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const interval = window.setInterval(() => load(false), Math.max(1, riskConfig.refresh_seconds) * 1000)
+    return () => window.clearInterval(interval)
+  }, [load, riskConfig.refresh_seconds])
 
   const overallStyle = RISK_LEVEL_STYLE[data?.overall_risk_level] || RISK_LEVEL_STYLE.low
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-white">위험 추세 현황</h2>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-white">위험 추세 현황</h2>
+            {riskConfig.mode === 'demo' && (
+              <span className="rounded-full bg-fuchsia-500/20 px-2 py-0.5 text-xs font-semibold text-fuchsia-200">데모 모드</span>
+            )}
+          </div>
+          {riskConfig.mode === 'demo' && <p className="mt-0.5 text-xs text-slate-500">{riskConfig.refresh_seconds}초마다 자동 갱신</p>}
+        </div>
         <div className="flex gap-1 rounded-lg border border-slate-700 p-0.5">
-          {['24h', '7d'].map((h) => (
+          {riskConfig.options.map((option) => (
             <button
-              key={h}
-              onClick={() => setHorizon(h)}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition ${horizon === h ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+              key={option.value}
+              onClick={() => setHorizon(option.value)}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition ${horizon === option.value ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
             >
-              {h === '24h' ? '24시간' : '7일'}
+              {option.label}
             </button>
           ))}
         </div>
@@ -132,7 +150,7 @@ function OverviewTab({ onError }) {
 
 // ── Report Tab ────────────────────────────────────────────────────────────────
 
-function ReportTab({ onError }) {
+function ReportTab({ onError, riskConfig }) {
   const [horizon, setHorizon] = useState('7d')
   const [eventType, setEventType] = useState('no_helmet')
   const [report, setReport] = useState(null)
@@ -168,9 +186,9 @@ function ReportTab({ onError }) {
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold text-white">AI 위험 보고서</h2>
         <div className="flex gap-1 rounded-lg border border-slate-700 p-0.5">
-          {['24h', '7d'].map((h) => (
-            <button key={h} onClick={() => setHorizon(h)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${horizon === h ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>
-              {h === '24h' ? '24시간' : '7일'}
+          {riskConfig.options.map((option) => (
+            <button key={option.value} onClick={() => setHorizon(option.value)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${horizon === option.value ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>
+              {option.label}
             </button>
           ))}
         </div>
@@ -511,6 +529,13 @@ const TABS = [
 export default function RiskDashboard({ onBack }) {
   const [tab, setTab] = useState('overview')
   const [error, setError] = useState('')
+  const [riskConfig, setRiskConfig] = useState(DEFAULT_RISK_CONFIG)
+
+  useEffect(() => {
+    fetchRiskConfig()
+      .then(setRiskConfig)
+      .catch((err) => setError(err.message))
+  }, [])
 
   return (
     <div className="space-y-5">
@@ -543,8 +568,8 @@ export default function RiskDashboard({ onBack }) {
         ))}
       </div>
 
-      {tab === 'overview'  && <OverviewTab  onError={setError} />}
-      {tab === 'report'    && <ReportTab    onError={setError} />}
+      {tab === 'overview'  && <OverviewTab  onError={setError} riskConfig={riskConfig} />}
+      {tab === 'report'    && <ReportTab    onError={setError} riskConfig={riskConfig} />}
       {tab === 'episodes'  && <EpisodesTab  onError={setError} />}
       {tab === 'knowledge' && <KnowledgeTab onError={setError} />}
     </div>

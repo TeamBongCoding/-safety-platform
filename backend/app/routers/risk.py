@@ -10,12 +10,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import require_current_site
+from ..config import RISK_REFRESH_SECONDS, RISK_WINDOW_MODE
 from ..database import get_db
 from ..models import RiskPrediction, Site
 from ..schemas import RiskOverviewOut, RiskReportOut, RiskResultOut
 from ..services.risk_engine import get_risk_engine, result_to_dict
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
+
+
+@router.get("/config")
+def get_risk_config(site: Site = Depends(require_current_site)):
+    """Return display labels without changing legacy horizon API values."""
+    engine = get_risk_engine()
+    return {
+        "mode": engine.window_mode,
+        "refresh_seconds": RISK_REFRESH_SECONDS,
+        "options": engine.window_options(),
+    }
 
 
 @router.get("/overview", response_model=RiskOverviewOut)
@@ -36,6 +48,14 @@ def get_risk_overview(
             RiskPrediction.valid_until >= now,
         ).order_by(RiskPrediction.generated_at.desc())
     ).all()
+
+    if RISK_WINDOW_MODE == "demo":
+        cache_cutoff = now - timedelta(seconds=RISK_REFRESH_SECONDS)
+        rows = [row for row in rows if row.generated_at >= cache_cutoff]
+    latest_rows = {}
+    for row in rows:
+        latest_rows.setdefault(row.event_type, row)
+    rows = list(latest_rows.values())
 
     if not rows:
         # 없으면 즉시 계산
@@ -253,7 +273,10 @@ def get_latest_report(
 
 def _persist_predictions(db, site_id: int, horizon: str, results) -> None:
     from ..services.risk_engine import result_to_dict
-    valid_until = datetime.now() + timedelta(hours=1 if horizon == "24h" else 6)
+    if RISK_WINDOW_MODE == "demo":
+        valid_until = datetime.now() + timedelta(seconds=RISK_REFRESH_SECONDS)
+    else:
+        valid_until = datetime.now() + timedelta(hours=1 if horizon == "24h" else 6)
     for r in results:
         d = result_to_dict(r)
         pred = RiskPrediction(

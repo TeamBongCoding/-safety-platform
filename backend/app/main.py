@@ -51,11 +51,12 @@ app.include_router(knowledge.router)
 
 @app.get("/health")
 def health():
-    from .config import DATABASE_URL, LOCAL_LLM_ENABLED
+    from .config import DATABASE_URL, OPENAI_ENABLED
     return {
         "status": "ok",
         "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
-        "llm_enabled": LOCAL_LLM_ENABLED,
+        "llm_enabled": OPENAI_ENABLED,
+        "llm_provider": "openai" if OPENAI_ENABLED else None,
     }
 
 

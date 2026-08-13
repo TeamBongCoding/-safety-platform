@@ -86,7 +86,7 @@ class TestRiskEngineNoData(unittest.TestCase):
     def test_baseline_zero_handled(self):
         # baseline=0 but recent>0 → change_pct=100%, no division error
         _add_episodes(self.db, site_id=1, event_type="no_helmet", n=3, days_ago=1)
-        results = self.engine.predict(site_id=1, db=self.db, event_types=["no_helmet"])
+        results = self.engine.predict(site_id=1, db=self.db, horizon="7d", event_types=["no_helmet"])
         r = results[0]
         self.assertGreater(r.risk_score, 0)
         self.assertIn("기준 기간 데이터가 없어", " ".join(r.limitations))
@@ -105,7 +105,7 @@ class TestRiskEngineWithData(unittest.TestCase):
         # 직전 7일: 1건, 최근 7일: 5건 → 증가 → 점수 상승
         _add_episodes(self.db, site_id=1, event_type="no_helmet", n=1, days_ago=10)
         _add_episodes(self.db, site_id=1, event_type="no_helmet", n=5, days_ago=2)
-        results = self.engine.predict(site_id=1, db=self.db, event_types=["no_helmet"])
+        results = self.engine.predict(site_id=1, db=self.db, horizon="7d", event_types=["no_helmet"])
         r = results[0]
         self.assertGreater(r.risk_score, 0)
         self.assertGreater(r.recent_rate, 0)
@@ -128,7 +128,7 @@ class TestRiskEngineWithData(unittest.TestCase):
     def test_large_sample_medium_or_high_confidence(self):
         _add_exposure(self.db, site_id=4, worker_seconds=360000)
         _add_episodes(self.db, site_id=4, event_type="no_helmet", n=15, days_ago=5)
-        results = self.engine.predict(site_id=4, db=self.db, event_types=["no_helmet"])
+        results = self.engine.predict(site_id=4, db=self.db, horizon="7d", event_types=["no_helmet"])
         r = results[0]
         self.assertIn(r.confidence_level, ("medium", "high"))
 
@@ -140,6 +140,64 @@ class TestRiskEngineWithData(unittest.TestCase):
         metric_names = [f.metric for f in r.factors]
         self.assertIn("sample_count", metric_names)
 
+
+class TestRiskEngineWindows(unittest.TestCase):
+    def setUp(self):
+        Session = _make_db()
+        self.db = Session()
+        self.engine = RuleBasedRiskEngine(
+            window_mode="demo",
+            short_window_minutes=1,
+            long_window_minutes=5,
+        )
+
+    def tearDown(self):
+        self.db.close()
+
+    def _add_seconds_ago(self, seconds: int):
+        ep = EventEpisode(
+            site_id=1,
+            event_type="no_helmet",
+            started_at=datetime.now() - timedelta(seconds=seconds),
+            duration_sec=10.0,
+            severity="medium",
+            confidence_avg=0.8,
+            observation_count=2,
+            model_version="1.0",
+            rule_version="1.0",
+            resolved=True,
+        )
+        self.db.add(ep)
+        self.db.commit()
+
+    def test_demo_short_and_long_windows_differ(self):
+        self._add_seconds_ago(30)
+        self._add_seconds_ago(150)
+
+        short = self.engine.predict(1, self.db, horizon="24h", event_types=["no_helmet"])[0]
+        long = self.engine.predict(1, self.db, horizon="7d", event_types=["no_helmet"])[0]
+
+        self.assertEqual(short.recent_rate, 1.0)
+        self.assertEqual(long.recent_rate, 0.4)
+        self.assertNotEqual(short.recent_rate, long.recent_rate)
+
+    def test_demo_compares_previous_equal_window(self):
+        self._add_seconds_ago(30)
+        self._add_seconds_ago(90)
+
+        result = self.engine.predict(1, self.db, horizon="24h", event_types=["no_helmet"])[0]
+
+        self.assertEqual(result.recent_rate, 1.0)
+        self.assertEqual(result.baseline_rate, 1.0)
+        self.assertEqual(result.change_percent, 0.0)
+
+    def test_production_horizons_use_distinct_windows(self):
+        self._add_seconds_ago(2 * 86400)
+        production = RuleBasedRiskEngine(window_mode="production")
+        short = production.predict(1, self.db, horizon="24h", event_types=["no_helmet"])[0]
+        long = production.predict(1, self.db, horizon="7d", event_types=["no_helmet"])[0]
+        self.assertEqual(short.recent_rate, 0.0)
+        self.assertGreater(long.recent_rate, 0.0)
 
 if __name__ == "__main__":
     unittest.main()

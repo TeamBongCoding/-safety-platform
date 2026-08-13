@@ -1,4 +1,4 @@
-"""로컬 LLM HTTP 클라이언트 — OpenAI-compatible API 사용.
+"""OpenAI SDK 기반 위험 보고서 생성 클라이언트.
 
 LLM 역할 제한
 -------------
@@ -12,13 +12,11 @@ LLM 실패 시: fallback_report()로 Risk Engine 결과를 그대로 반환한�
 
 from __future__ import annotations
 
-import json
 import logging
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from openai import APIError, OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -83,8 +81,9 @@ _SYSTEM_PROMPT = """당신은 건설현장 안전관리 AI 어시스턴트입니
 @dataclass
 class LLMConfig:
     enabled: bool = False
-    base_url: str = "http://127.0.0.1:8001/v1"
-    model: str = "Qwen/Qwen3-4B"
+    api_key: str = ""
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
     timeout_sec: float = 60.0
     max_tokens: int = 1000
     temperature: float = 0.1
@@ -93,20 +92,24 @@ class LLMConfig:
 
 def _load_config() -> LLMConfig:
     from ..config import (
-        LOCAL_LLM_BASE_URL,
-        LOCAL_LLM_ENABLED,
-        LOCAL_LLM_MAX_TOKENS,
-        LOCAL_LLM_MODEL,
-        LOCAL_LLM_TEMPERATURE,
-        LOCAL_LLM_TIMEOUT_SEC,
+        OPENAI_API_KEY,
+        OPENAI_BASE_URL,
+        OPENAI_ENABLED,
+        OPENAI_MAX_RETRIES,
+        OPENAI_MAX_TOKENS,
+        OPENAI_MODEL,
+        OPENAI_TEMPERATURE,
+        OPENAI_TIMEOUT_SEC,
     )
     return LLMConfig(
-        enabled=LOCAL_LLM_ENABLED,
-        base_url=LOCAL_LLM_BASE_URL.rstrip("/"),
-        model=LOCAL_LLM_MODEL,
-        timeout_sec=LOCAL_LLM_TIMEOUT_SEC,
-        max_tokens=LOCAL_LLM_MAX_TOKENS,
-        temperature=LOCAL_LLM_TEMPERATURE,
+        enabled=OPENAI_ENABLED,
+        api_key=OPENAI_API_KEY,
+        base_url=OPENAI_BASE_URL,
+        model=OPENAI_MODEL,
+        timeout_sec=OPENAI_TIMEOUT_SEC,
+        max_tokens=OPENAI_MAX_TOKENS,
+        temperature=OPENAI_TEMPERATURE,
+        max_retries=OPENAI_MAX_RETRIES,
     )
 
 
@@ -122,6 +125,7 @@ def _build_user_prompt(
         "event_type": risk_result["event_type"],
         "horizon": risk_result["horizon"],
         "recent_rate": risk_result["recent_rate"],
+        "window_label": risk_result.get("window_label", risk_result["horizon"]),
         "baseline_rate": risk_result["baseline_rate"],
         "change_percent": risk_result["change_percent"],
         "confidence_level": risk_result["confidence_level"],
@@ -156,58 +160,51 @@ def call_llm(
     cfg = config or _load_config()
     if not cfg.enabled:
         return None
+    if not cfg.api_key:
+        logger.warning("OPENAI_ENABLED=1이지만 OPENAI_API_KEY가 없습니다.")
+        return None
 
     user_prompt = _build_user_prompt(risk_result, retrieved_chunks)
-    payload = json.dumps({
-        "model": cfg.model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "max_tokens": cfg.max_tokens,
-        "temperature": cfg.temperature,
-    }).encode("utf-8")
+    client_options: dict[str, Any] = {
+        "api_key": cfg.api_key,
+        "timeout": cfg.timeout_sec,
+        "max_retries": cfg.max_retries,
+        # 빈 OPENAI_BASE_URL 환경변수가 SDK의 기본 URL을 덮어쓰지 않게 명시한다.
+        "base_url": cfg.base_url.rstrip("/"),
+    }
 
-    for attempt in range(cfg.max_retries + 1):
-        try:
-            req = urllib.request.Request(
-                f"{cfg.base_url}/chat/completions",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=cfg.timeout_sec) as resp:
-                body = json.loads(resp.read())
-            content = body["choices"][0]["message"]["content"]
-            # JSON 블록 추출 (```json ... ``` 형식 허용)
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-            parsed = json.loads(content)
-            # hallucinated citations 제거 — 실제 chunk_id에 없는 것은 삭제
-            valid_chunk_ids = {c["chunk_id"] for c in retrieved_chunks}
-            if "citations" in parsed:
-                parsed["citations"] = [
-                    cit for cit in parsed["citations"]
-                    if cit.get("chunk_id") in valid_chunk_ids
-                ]
-            report = LLMReport.model_validate(parsed)
-            # risk_level은 LLM이 변경 불가
-            report.risk_level = risk_result["risk_level"]
-            return report
-        except urllib.error.URLError as exc:
-            logger.warning("LLM 연결 실패 (attempt %d): %s", attempt + 1, exc)
-        except TimeoutError:
-            logger.warning("LLM timeout (attempt %d)", attempt + 1)
-        except (json.JSONDecodeError, KeyError, ValidationError) as exc:
-            logger.warning("LLM 출력 파싱 실패 (attempt %d): %s", attempt + 1, exc)
-            break  # 파싱 오류는 재시도하지 않음
-        except Exception as exc:
-            logger.error("LLM 오류 (attempt %d): %s", attempt + 1, exc)
-            break
+    try:
+        client = OpenAI(**client_options)
+        response = client.responses.parse(
+            model=cfg.model,
+            input=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            text_format=LLMReport,
+            max_output_tokens=cfg.max_tokens,
+            temperature=cfg.temperature,
+        )
+        report = response.output_parsed
+        if report is None:
+            raise ValueError("OpenAI 응답에 구조화된 출력이 없습니다.")
+
+        # 실제 검색 결과에 없는 인용은 모델이 반환해도 제거한다.
+        valid_chunk_ids = {c["chunk_id"] for c in retrieved_chunks}
+        report.citations = [
+            citation
+            for citation in report.citations
+            if citation.chunk_id in valid_chunk_ids
+        ]
+        # 위험 등급의 최종 결정권은 항상 Risk Engine에 있다.
+        report.risk_level = risk_result["risk_level"]
+        return report
+    except APIError as exc:
+        logger.warning("OpenAI API 호출 실패: %s", exc)
+    except (ValidationError, ValueError) as exc:
+        logger.warning("OpenAI 구조화 출력 검증 실패: %s", exc)
+    except Exception as exc:
+        logger.error("OpenAI SDK 오류: %s", exc)
 
     return None
 
@@ -226,11 +223,12 @@ def fallback_report(risk_result: dict, horizon: str = "24h") -> LLMReport:
     event_type = risk_result["event_type"]
     label = event_labels.get(event_type, event_type)
     level = risk_result["risk_level"]
+    window_label = risk_result.get("window_label", horizon)
     change = risk_result.get("change_percent", 0)
     direction = "증가" if change >= 0 else "감소"
 
     summary = (
-        f"최근 7일 {label} 발생률이 직전 7일 대비 {abs(change):.0f}% {direction}했습니다. "
+        f"최근 {window_label} {label} 발생률이 직전 {window_label} 대비 {abs(change):.0f}% {direction}했습니다. "
         f"현재 위험 등급은 {level.upper()}이며, 신뢰도는 {risk_result.get('confidence_level', 'low')}입니다. "
         "(LLM 서비스가 비활성화되어 있습니다.)"
     )
