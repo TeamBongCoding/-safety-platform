@@ -2,12 +2,12 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from shapely.geometry import Polygon
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..auth import require_current_site
 from ..database import get_db
-from ..models import Site, Zone
+from ..models import Event, EventEpisode, RiskPrediction, Site, Zone
 from ..schemas import ZoneCreate, ZoneOut, ZoneVisibility
 
 router = APIRouter(prefix="/api/zones", tags=["zones"])
@@ -125,5 +125,12 @@ def delete_zone(
     site: Site = Depends(require_current_site),
     db: Session = Depends(get_db),
 ):
-    db.delete(require_site_zone(zone_id, site, db))
+    zone = require_site_zone(zone_id, site, db)
+    for model in (Event, EventEpisode, RiskPrediction):
+        db.execute(
+            update(model)
+            .where(model.zone_id == zone.id)
+            .values(zone_id=None)
+        )
+    db.delete(zone)
     db.commit()

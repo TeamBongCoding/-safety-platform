@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
+from ..time_utils import kst_now
+
 logger = logging.getLogger(__name__)
 
 HeatLevel = Literal["inactive", "caution", "warning", "severe"]
@@ -130,7 +132,7 @@ class HeatService:
             self._stop.wait(self.POLL_INTERVAL)
 
     def _fetch(self):
-        now = datetime.now()
+        now = kst_now()
         base_date, base_time = _kma_base_time(now)
         nx, ny = latlon_to_kma_grid(self._lat, self._lon)
         params = urllib.parse.urlencode({
@@ -151,15 +153,15 @@ class HeatService:
             data = json.load(resp)
 
         items = data["response"]["body"]["items"]["item"]
-        target_date = now.strftime('%Y%m%d')
-
         # 현재 시각 기준 가장 가까운 예보 슬롯을 찾는다 (최대 3시간 앞까지)
         values: dict[str, float] = {}
         for delta_h in range(4):
-            target_time = (
-                (now.replace(minute=0, second=0) + timedelta(hours=delta_h))
-                .strftime('%H') + '00'
+            target = (
+                now.replace(minute=0, second=0, microsecond=0)
+                + timedelta(hours=delta_h)
             )
+            target_date = target.strftime('%Y%m%d')
+            target_time = target.strftime('%H00')
             values = {}
             for item in items:
                 if item["fcstDate"] == target_date and item["fcstTime"] == target_time:
