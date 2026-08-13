@@ -1,36 +1,197 @@
 """바운딩박스 + 한글 상태 라벨 오버레이."""
+import logging
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from ..config import FONT_PATH
+from ..config import DEBUG_POSE, FONT_PATH, POSE_KEYPOINT_CONF
+
+logger = logging.getLogger(__name__)
+
+_FONT_CANDIDATES = [
+    FONT_PATH,
+    "C:/Windows/Fonts/malgun.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/nanum/NanumGothic.ttf",
+]
 
 
-FONT = ImageFont.truetype(FONT_PATH, 18)
+def _load_font(size: int = 14):
+    for path in _FONT_CANDIDATES:
+        try:
+            font = ImageFont.truetype(path, size)
+            return font
+        except (OSError, IOError):
+            continue
+    logger.warning("한글 폰트를 찾지 못했습니다. PIL 기본 폰트로 대체합니다.")
+    return ImageFont.load_default()
+
+
+FONT_SM = _load_font(12)   # ID·보조 정보
+FONT_MD = _load_font(13)   # 상태 뱃지
+
 LEVEL_COLORS = {"ok": (80, 220, 80), "warn": (0, 160, 255), "alert": (60, 60, 255)}
 
+# 행(row)별 텍스트색·배경색 (RGB)
+_ROW_ID        = {"fg": (210, 210, 210), "bg": (20,  20,  20)}
+_ROW_HELMET_OK = {"fg": (90,  220, 90),  "bg": (10,  40,  10)}
+_ROW_HELMET_NO = {"fg": (120, 140, 255), "bg": (25,  10,  35)}
+_ROW_HELMET_UNKNOWN = {"fg": (170, 170, 170), "bg": (30, 30, 30)}
+_ROW_ZONE      = {"fg": (160, 160, 160), "bg": (25,  25,  25)}
+_ROW_HEAT      = {"fg": (255, 185, 50),  "bg": (55,  25,   0)}
+_ROW_HEAT_NO   = {"fg": (100, 100, 100), "bg": (22,  22,  22)}
+_ROW_BEHAVIOR_WARN  = {"fg": (255, 180, 50),  "bg": (55,  30,   0)}
+_ROW_BEHAVIOR_ALERT = {"fg": (255,  60, 60),  "bg": (60,   0,   0)}
 
-def draw_status(frame, box, helmet_on, hook_closed, zone_label, level):
+_PAD_X  = 4   # 좌우 여백
+_PAD_Y  = 2   # 상하 여백
+_GAP    = 1   # 행 간 간격
+_ALPHA  = 195 # 배경 반투명도 (0=완전투명, 255=완전불투명)
+
+
+def draw_status(
+    frame,
+    box,
+    helmet_on,
+    zone_label,
+    level,
+    track_id,
+    in_heat_zone=False,
+    heat_seconds=0.0,
+    helmet_violation=False,
+    behavior_state=None,
+    behavior_heat_related=False,
+    behavior_debug=None,
+):
     x1, y1, x2, y2 = map(int, box)
-    color = LEVEL_COLORS[level]
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    box_w = max(x2 - x1, 1)
+    box_h = max(y2 - y1, 1)
+    box_color_bgr = LEVEL_COLORS[level]
 
-    lines = [
-        f"헬멧 {'착용' if helmet_on else '미착용'}",
-        f"고리 {'체결' if hook_closed else '미체결'}",
+    # 폭염구역이면 주황 외곽선 추가
+    if in_heat_zone:
+        cv2.rectangle(frame, (x1 - 2, y1 - 2), (x2 + 2, y2 + 2), (0, 140, 255), 2)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color_bgr, 2)
+
+    # PIL RGBA 모드로 변환 (반투명 배경 지원)
+    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA))
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # ── 행 정의 ──────────────────────────────────────────────────
+    short_id = track_id.replace("person-", "")
+    if helmet_on is True:
+        helmet_text, helmet_style = "안전모 착용", _ROW_HELMET_OK
+    elif helmet_on is False and helmet_violation:
+        helmet_text, helmet_style = "안전모 미착용", _ROW_HELMET_NO
+    elif helmet_on is False:
+        helmet_text, helmet_style = "안전모 미착용 (허용)", _ROW_HELMET_OK
+    else:
+        helmet_text, helmet_style = "안전모 판정 불가", _ROW_HELMET_UNKNOWN
+    rows = [
+        (f"작업자 #{short_id}", FONT_SM, _ROW_ID),
+        (helmet_text, FONT_MD, helmet_style),
     ]
     if zone_label:
-        lines.append(f"구역: {zone_label}")
+        rows.append((f"구역 {zone_label}", FONT_SM, _ROW_ZONE))
+    if in_heat_zone:
+        m, s = divmod(int(heat_seconds), 60)
+        rows.append((f"폭염 누적 {m:02d}:{s:02d}", FONT_MD, _ROW_HEAT))
+    else:
+        rows.append(("폭염구역 아님", FONT_SM, _ROW_HEAT_NO))
 
-    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    d = ImageDraw.Draw(img)
-    tx, ty = x2 + 6, y1
-    for line in lines:
-        w, h = d.textbbox((0, 0), line, font=FONT)[2:]
-        d.rectangle([tx, ty, tx + w + 8, ty + h + 6], fill=(20, 20, 20))
-        d.text((tx + 4, ty + 3), line, font=FONT, fill=tuple(reversed(color)))
-        ty += h + 8
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    # 이상행동 감지 배지 (NORMAL 이 아닐 때만)
+    if behavior_state is not None and behavior_state.value != "NORMAL":
+        from .pose_behavior_detector import BEHAVIOR_LABELS, BehaviorState
+        label = BEHAVIOR_LABELS.get(behavior_state, behavior_state.value)
+        if behavior_heat_related:
+            label = f"폭염 {label}"
+        is_severe = behavior_state in (BehaviorState.FALL, BehaviorState.FALL_STILL)
+        style = _ROW_BEHAVIOR_ALERT if is_severe else _ROW_BEHAVIOR_WARN
+        rows.append((f"[행동] {label}", FONT_MD, style))
+
+    # DEBUG_POSE: 진단 정보 추가 행
+    if DEBUG_POSE and behavior_debug:
+        ratio = behavior_debug.get("bbox_ratio")
+        angle = behavior_debug.get("body_angle")
+        debug_txt = f"R:{ratio:.2f} A:{angle:.0f}" if angle is not None else f"R:{ratio:.2f}"
+        rows.append((debug_txt, FONT_SM, _ROW_ID))
+
+    # ── 행 크기 사전 계산 → 패널 너비 결정 ──────────────────────
+    frame_h, frame_w = frame.shape[:2]
+    _PANEL_GAP = 6   # 박스와 패널 사이 간격
+
+    row_sizes = []
+    for text, font, style in rows:
+        tb = d.textbbox((0, 0), text, font=font)
+        row_sizes.append((tb[2], tb[3], text, font, style))
+
+    panel_w = max((tw + _PAD_X * 2 for tw, *_ in row_sizes), default=60)
+    panel_h = sum(th + _PAD_Y * 2 + _GAP for _, th, *_ in row_sizes) - _GAP
+
+    # ── 패널 위치: 박스 오른쪽 우선, 넘치면 왼쪽 ───────────────
+    tx = x2 + _PANEL_GAP
+    if tx + panel_w > frame_w:
+        tx = x1 - panel_w - _PANEL_GAP
+    tx = max(0, tx)
+
+    ty = y1
+    # 패널이 프레임 하단을 벗어나면 위로 올림
+    if ty + panel_h > frame_h:
+        ty = max(0, frame_h - panel_h)
+
+    # ── 패널 전체 반투명 배경 (단일 직사각형) ────────────────────
+    d.rectangle(
+        [tx - 2, ty - 2, tx + panel_w + 2, ty + panel_h + 2],
+        fill=(10, 10, 10, 160),
+    )
+
+    # ── 각 행 렌더링 ─────────────────────────────────────────────
+    cy = ty
+    for tw, th, text, font, style in row_sizes:
+        row_h = th + _PAD_Y * 2
+        d.rectangle(
+            [tx, cy, tx + panel_w, cy + row_h],
+            fill=(*style["bg"], _ALPHA),
+        )
+        d.text(
+            (tx + _PAD_X, cy + _PAD_Y),
+            text,
+            font=font,
+            fill=(*style["fg"], 255),
+        )
+        cy += row_h + _GAP
+
+    # ── 박스에서 패널로 연결선 ────────────────────────────────────
+    line_x = x2 if tx >= x2 else x1
+    line_y = (y1 + y2) // 2
+    panel_anchor_y = ty + panel_h // 2
+    d.line(
+        [(line_x, line_y), (tx if tx >= x2 else tx + panel_w, panel_anchor_y)],
+        fill=(180, 180, 180, 120),
+        width=1,
+    )
+
+    return cv2.cvtColor(np.array(img), cv2.COLOR_RGBA2BGR)
+
+
+def draw_pose_skeleton(frame, pose_detections: list) -> np.ndarray:
+    """DEBUG_POSE=True 일 때 keypoint 와 skeleton 을 영상에 그린다."""
+    if not DEBUG_POSE or not pose_detections:
+        return frame
+    from .pose_detector import SKELETON_PAIRS
+    for _bbox, kps in pose_detections:
+        # skeleton lines
+        for i, j in SKELETON_PAIRS:
+            if kps[i, 2] >= POSE_KEYPOINT_CONF and kps[j, 2] >= POSE_KEYPOINT_CONF:
+                pt1 = (int(kps[i, 0]), int(kps[i, 1]))
+                pt2 = (int(kps[j, 0]), int(kps[j, 1]))
+                cv2.line(frame, pt1, pt2, (0, 230, 180), 1)
+        # keypoint dots
+        for k in range(kps.shape[0]):
+            if kps[k, 2] >= POSE_KEYPOINT_CONF:
+                cv2.circle(frame, (int(kps[k, 0]), int(kps[k, 1])), 3, (255, 220, 0), -1)
+    return frame
 
 
 def draw_zones(frame, zones, w, h):

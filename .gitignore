@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+.ipynb_checkpoints/
 
 # Node
 node_modules/
@@ -10,11 +11,20 @@ dist/
 
 # 대용량 (드라이브로 공유)
 *.pt
+*.pth
 data/videos/*.mp4
 data/videos/*.mov
 backend/output*.mp4
+evaluation/videos/*
+!evaluation/videos/.gitkeep
+evaluation/results/*
+!evaluation/results/.gitkeep
 
 # 환경변수 (텔레그램 토큰 등)
 .env
+
+# JupyterHub deployment runtime
+.run/
+.tools/
 
 .DS_Store
