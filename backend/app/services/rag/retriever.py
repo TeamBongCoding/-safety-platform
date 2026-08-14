@@ -60,14 +60,17 @@ class KnowledgeRetriever:
 
         provider = self._provider()
         query_vec = provider.encode_one(query)
+        # 다른 모델의 벡터는 차원이 같아도 서로 비교할 수 없다.
+        # 명시적 필터가 없으면 현재 provider로 인덱싱한 청크만 검색한다.
+        model_filter = embedding_model_filter or provider.model_name
 
         # 설정 문자열이 아니라 이 retriever가 실제로 사용하는 세션의
         # dialect를 확인한다. 테스트/도구에서 별도 SQLite 세션을 주입할 수 있다.
         with self._session_factory() as db:
             dialect_name = db.get_bind().dialect.name
         if dialect_name == "sqlite":
-            return self._search_sqlite(query_vec, site_id, k, thr, embedding_model_filter)
-        return self._search_pgvector(query_vec, site_id, k, thr, embedding_model_filter)
+            return self._search_sqlite(query_vec, site_id, k, thr, model_filter)
+        return self._search_pgvector(query_vec, site_id, k, thr, model_filter)
 
     # ── PostgreSQL / pgvector ─────────────────────────────────────────────────
 

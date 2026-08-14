@@ -110,8 +110,17 @@ SUPABASE_DOCUMENT_BUCKET = os.getenv("SUPABASE_DOCUMENT_BUCKET", "safety-documen
 SUPABASE_SNAPSHOT_BUCKET = os.getenv("SUPABASE_SNAPSHOT_BUCKET", "event-snapshots")
 SUPABASE_CLIP_BUCKET = os.getenv("SUPABASE_CLIP_BUCKET", "event-clips")
 # ── RAG / Embedding ───────────────────────────────────────────────
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "auto").strip().lower()
+if EMBEDDING_PROVIDER not in {"auto", "local", "openai"}:
+    raise ValueError("EMBEDDING_PROVIDER는 auto, local, openai 중 하나여야 합니다.")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
+OPENAI_EMBEDDING_MODEL = os.getenv(
+    "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+)
+OPENAI_EMBEDDING_BATCH_SIZE = max(
+    1, int(os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", "64"))
+)
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
 RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.7"))
 # ──────────────────────────────────────────────────────────────────

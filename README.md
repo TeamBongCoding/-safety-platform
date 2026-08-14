@@ -58,7 +58,7 @@ flowchart LR
 | 공간 판정 | Shapely, 정규화 폴리곤 ROI |
 | 데이터 | SQLAlchemy, SQLite 또는 PostgreSQL/Supabase, pgvector |
 | AI 보고서 | OpenAI Python SDK, 구조화 출력, 결정론적 fallback 보고서 |
-| RAG | Sentence Transformers `BAAI/bge-m3`, 문서 chunk 검색, PDF/TXT/MD |
+| RAG | OpenAI Embeddings 또는 로컬 `BAAI/bge-m3`, 문서 chunk 검색, PDF/TXT/MD |
 | 외부 데이터 | 기상청 단기예보 API |
 | 배포 | JupyterHub, Cloudflare Tunnel, 동일 origin 정적 배포 |
 
@@ -164,15 +164,22 @@ AI 분석 포함 실행은 다음과 같습니다.
 | `DATABASE_URL` | SQLite 또는 PostgreSQL 연결 문자열 | `sqlite:///./safety.db` |
 | `COOKIE_SECURE` | HTTPS 전용 로그인 쿠키 | 로컬 HTTP `0`, 외부 HTTPS `1` |
 | `KMA_API_KEY` | 기상청 API 인증키 | 실외 체감온도 사용 시 설정 |
-| `OPENAI_ENABLED` | OpenAI 보고서 활성화 | 키 설정 후 `1` |
+| `OPENAI_ENABLED` | OpenAI 보고서 및 `auto` 외부 임베딩 활성화 | 키 설정 후 `1` |
 | `OPENAI_API_KEY` | OpenAI 또는 호환 gateway 키 | `.env`에만 저장 |
 | `OPENAI_MODEL` | 보고서 생성 모델 | `gpt-4o-mini` |
 | `OPENAI_BASE_URL` | 별도 호환 gateway 주소 | 없으면 공식 OpenAI API |
-| `EMBEDDING_MODEL_NAME` | RAG 임베딩 모델 | `BAAI/bge-m3` |
+| `EMBEDDING_PROVIDER` | RAG 임베딩 제공자 | `auto`: OpenAI 활성 시 외부, 아니면 로컬 |
+| `EMBEDDING_MODEL_NAME` | 로컬 RAG 임베딩 모델 | `BAAI/bge-m3` |
+| `OPENAI_EMBEDDING_MODEL` | 외부 RAG 임베딩 모델 | `text-embedding-3-small` |
+| `EMBEDDING_DIM` | 저장하는 임베딩 차원 | `1024` |
 | `RAG_TOP_K` / `RAG_THRESHOLD` | 검색 개수와 최소 유사도 | `5` / `0.7` |
 | `RISK_WINDOW_MODE` | 위험 추세 시간축 | 데모 `demo`, 운영 `production` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | 고정 named tunnel 토큰 | Quick Tunnel은 비워 둠 |
 | `PUBLIC_URL` | named tunnel 공개 주소 | named tunnel 사용 시 설정 |
+
+`EMBEDDING_PROVIDER=auto`는 `OPENAI_ENABLED=1`일 때 기존 `OPENAI_API_KEY`를
+재사용하므로 별도 키 설정이 필요하지 않습니다. 임베딩 제공자나 모델을 바꾸면 기존
+벡터와 혼용할 수 없으므로 저장된 안전 문서를 새 모델로 다시 인덱싱해야 합니다.
 
 기상청에서 받은 인코딩 인증키에 `%`가 포함되어 있어도 `.env`에서는 별도 이스케이프 없이 발급값 그대로 입력합니다. 반면 `DATABASE_URL`의 비밀번호에 `@`, `/`, `#`, `%` 같은 예약 문자가 있으면 URL 인코딩된 연결 문자열을 사용하는 것이 안전합니다.
 
