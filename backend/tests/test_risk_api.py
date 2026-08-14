@@ -299,6 +299,7 @@ class TestRiskAPIAuth(unittest.TestCase):
         self.assertEqual(resp.headers["x-content-type-options"], "nosniff")
         self.assertEqual(resp.headers["x-frame-options"], "DENY")
         self.assertIn("default-src 'self'", resp.headers["content-security-policy"])
+        self.assertIn("media-src 'self' blob:", resp.headers["content-security-policy"])
         self.assertIn("max-age=31536000", resp.headers["strict-transport-security"])
 
 
