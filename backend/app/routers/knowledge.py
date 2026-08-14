@@ -116,6 +116,36 @@ def list_documents(
     ]
 
 
+@router.get("/chunks/{chunk_id}", response_model=DocumentChunkOut)
+def get_document_chunk(
+    chunk_id: int,
+    site: Site = Depends(require_current_site),
+    db: Session = Depends(get_db),
+):
+    row = db.execute(
+        select(DocumentChunk, KnowledgeDocument.title)
+        .join(
+            KnowledgeDocument,
+            KnowledgeDocument.id == DocumentChunk.document_id,
+        )
+        .where(
+            DocumentChunk.id == chunk_id,
+            KnowledgeDocument.site_id == site.id,
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="근거 문서를 찾을 수 없습니다.")
+
+    chunk, title = row
+    return DocumentChunkOut(
+        id=chunk.id,
+        document_id=chunk.document_id,
+        title=title,
+        section=chunk.section,
+        content=chunk.content,
+    )
+
+
 @router.delete("/documents/{document_id}", status_code=204)
 def delete_document(
     document_id: int,

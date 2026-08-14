@@ -5,6 +5,7 @@ import RankingDashboard from './RankingDashboard'
 import RiskDashboard from './RiskDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
+import { formatKoreanDateTime } from './time'
 
 const levelStyles = {
   ok: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -671,7 +672,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
               <tbody className="divide-y divide-slate-800">
                 {events.length ? events.map((event) => (
                   <tr key={event.id} className="text-slate-300 hover:bg-slate-800/40">
-                    <td className="whitespace-nowrap px-5 py-3 text-slate-400">{formatDate(event.timestamp)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-slate-400">{formatKoreanDateTime(event.timestamp)}</td>
                     <td className="px-5 py-3 font-medium text-red-300">{eventLabels[event.event_type] ?? event.event_type}</td>
                     <td className="px-5 py-3 tabular-nums text-cyan-300 text-xs">{event.track_id ? event.track_id.replace('person-', '#') : '-'}</td>
                     <td className="px-5 py-3">{event.zone_id ? `구역 ${event.zone_id}` : '일반구역'}</td>
@@ -947,12 +948,4 @@ function HelmetPill({ state, violation }) {
 
 function EmptyState({ text }) {
   return <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">{text}</div>
-}
-
-function formatDate(value) {
-  const utc = value && !value.endsWith('Z') && !value.includes('+') ? value + 'Z' : value
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(new Date(utc))
 }

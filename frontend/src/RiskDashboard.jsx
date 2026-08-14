@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchRiskConfig, fetchRiskOverview, generateRiskReport, fetchLatestReport, fetchEpisodes, resolveEpisode, fetchDocuments, fetchDocumentChunk, deleteDocument, uploadDocument } from './api'
+import { formatKoreanDateTime } from './time'
 
 const RISK_LEVEL_STYLE = {
   low:      { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
@@ -160,6 +161,7 @@ function ReportTab({ onError, riskConfig }) {
   const [generating, setGenerating] = useState(false)
   const [openSource, setOpenSource] = useState(null)
   const [sourceLoading, setSourceLoading] = useState(false)
+  const sourceRequestRef = useRef(0)
 
   const loadLatest = useCallback(async () => {
     try {
@@ -198,28 +200,44 @@ function ReportTab({ onError, riskConfig }) {
     (llm?.citations || []).map((citation) => [citation.chunk_id, citation]),
   )
 
-  const showSource = async (chunkId) => {
+  const closeSource = useCallback(() => {
+    sourceRequestRef.current += 1
+    setOpenSource(null)
+    setSourceLoading(false)
+  }, [])
+
+  const showSource = async (chunkId, title = '참고 문서') => {
     if (chunkId == null) return
+    const requestId = sourceRequestRef.current + 1
+    sourceRequestRef.current = requestId
     setSourceLoading(true)
-    setOpenSource({ title: '근거 불러오는 중...', section: null, content: '' })
+    setOpenSource({ title, section: null, content: '' })
     try {
-      setOpenSource(await fetchDocumentChunk(chunkId))
+      const source = await fetchDocumentChunk(chunkId)
+      if (sourceRequestRef.current === requestId) setOpenSource(source)
     } catch (err) {
-      setOpenSource(null)
-      onError(err.message)
+      if (sourceRequestRef.current === requestId) {
+        setOpenSource({
+          title,
+          section: null,
+          content: `근거 문서를 불러오지 못했습니다: ${err.message}`,
+          error: true,
+        })
+        onError(err.message)
+      }
     } finally {
-      setSourceLoading(false)
+      if (sourceRequestRef.current === requestId) setSourceLoading(false)
     }
   }
 
   useEffect(() => {
     if (!openSource) return undefined
     const closeOnEscape = (event) => {
-      if (event.key === 'Escape') setOpenSource(null)
+      if (event.key === 'Escape') closeSource()
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [openSource])
+  }, [openSource, closeSource])
 
   return (
     <div className="space-y-5">
@@ -254,7 +272,7 @@ function ReportTab({ onError, riskConfig }) {
             <div className="flex items-center gap-3">
               <span className="text-sm text-slate-400">{eventLabel(report.event_type)}</span>
               <RiskBadge level={report.risk_level} />
-              <span className="ml-auto text-xs text-slate-500">{new Date(report.generated_at).toLocaleString('ko-KR')}</span>
+              <span className="ml-auto text-xs text-slate-500">{formatKoreanDateTime(report.generated_at)}</span>
             </div>
             <div className="mt-2 flex items-center gap-2">
               <span className={`text-3xl font-bold tabular-nums ${(RISK_LEVEL_STYLE[report.risk_level] || RISK_LEVEL_STYLE.low).text}`}>{report.risk_score.toFixed(0)}</span>
@@ -303,7 +321,7 @@ function ReportTab({ onError, riskConfig }) {
                             {citationNumber && (
                               <button
                                 type="button"
-                                onClick={() => showSource(rec.source_chunk_id)}
+                                onClick={() => showSource(rec.source_chunk_id, source.title)}
                                 className="ml-1 align-super text-[10px] font-semibold text-cyan-400 hover:text-cyan-200 hover:underline"
                                 aria-label={`참고 문서 ${citationNumber} 열기`}
                               >
@@ -326,7 +344,7 @@ function ReportTab({ onError, riskConfig }) {
                       <li key={i} className="text-xs text-slate-400">
                         <button
                           type="button"
-                          onClick={() => showSource(c.chunk_id)}
+                          onClick={() => showSource(c.chunk_id, c.title)}
                           className="text-left hover:text-cyan-300 hover:underline"
                         >
                           [{i + 1}] {c.title}{c.section ? ` — ${c.section}` : ''}
@@ -365,7 +383,7 @@ function ReportTab({ onError, riskConfig }) {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setOpenSource(null)
+            if (event.target === event.currentTarget) closeSource()
           }}
           role="presentation"
         >
@@ -375,12 +393,12 @@ function ReportTab({ onError, riskConfig }) {
               <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
               <span className="ml-2 min-w-0 flex-1 truncate font-mono text-xs text-slate-400">reference://{openSource.title}</span>
-              <button type="button" onClick={() => setOpenSource(null)} className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-800 hover:text-white">닫기</button>
+              <button type="button" onClick={closeSource} className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-800 hover:text-white">닫기</button>
             </div>
             <div className="max-h-[65vh] overflow-y-auto p-5 font-mono">
               <p className="text-sm font-semibold text-cyan-300">$ {openSource.title}</p>
               {openSource.section && <p className="mt-1 text-xs text-slate-500"># {openSource.section}</p>}
-              <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">
+              <div className={`mt-4 whitespace-pre-wrap text-sm leading-7 ${openSource.error ? 'text-red-300' : 'text-slate-300'}`}>
                 {sourceLoading ? '근거 내용을 불러오는 중...' : openSource.content}
               </div>
             </div>
@@ -459,7 +477,7 @@ function EpisodesTab({ onError }) {
                     {ep.resolved && <span className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-400">해결됨</span>}
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {new Date(ep.started_at).toLocaleString('ko-KR')}
+                    {formatKoreanDateTime(ep.started_at)}
                     {ep.duration_sec > 0 && ` · ${ep.duration_sec.toFixed(0)}초`}
                     {ep.observation_count > 1 && ` · ${ep.observation_count}회 관측`}
                     {ep.track_id && ` · 추적 ${ep.track_id}`}

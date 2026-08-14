@@ -27,3 +27,15 @@ def kst_isoformat(value: datetime) -> str:
     else:
         value = value.astimezone(KST)
     return value.isoformat()
+
+
+def utc_stored_isoformat(value: datetime) -> str:
+    """Convert UTC-backed timestamps to an explicit Korean Standard Time value.
+
+    Episode and risk tables historically store naive ``datetime.now()`` values
+    on the UTC server. Treating those values as KST only relabels the clock and
+    makes them nine hours early, so attach UTC first and then convert.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(KST).isoformat()
