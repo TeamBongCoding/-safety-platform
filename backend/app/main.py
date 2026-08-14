@@ -2,8 +2,9 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
@@ -36,6 +37,55 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "testserver"}
+_CONTENT_SECURITY_POLICY = "; ".join((
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' blob: data:",
+    "connect-src 'self' ws: wss:",
+    "font-src 'self' data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+))
+
+
+def _add_security_headers(response, is_https: bool):
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "camera=(self), microphone=(), geolocation=()"
+    )
+    if is_https:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+@app.middleware("http")
+async def enforce_external_https_and_security_headers(request: Request, call_next):
+    """외부 프록시 HTTP를 HTTPS로 전환하고 모든 HTTP 응답을 보호한다."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    forwarded_proto = forwarded_proto.split(",", 1)[0].strip().lower()
+    host = (request.url.hostname or "").lower()
+    is_external = host not in _LOCAL_HOSTS
+    is_https = forwarded_proto == "https" or request.url.scheme == "https"
+
+    if is_external and forwarded_proto == "http":
+        target = request.url.replace(scheme="https")
+        return _add_security_headers(
+            RedirectResponse(str(target), status_code=307),
+            is_https=True,
+        )
+
+    response = await call_next(request)
+    return _add_security_headers(response, is_https=is_https)
 
 app.include_router(auth.router)
 app.include_router(admin.router)

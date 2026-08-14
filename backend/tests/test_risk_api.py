@@ -3,6 +3,7 @@
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -20,6 +21,8 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import EventEpisode, LoginSession, Site, User
 from app.auth import hash_password, _token_hash
+from app.services.rag.indexer import EmbeddingGenerationError
+from app.routers.risk import rag_query_for_event
 
 
 def _make_engine():
@@ -178,12 +181,73 @@ class TestRiskAPIAuth(unittest.TestCase):
         resp = self.client.get("/api/knowledge/documents")
         self.assertEqual(resp.status_code, 401)
 
+    def test_knowledge_upload_embedding_failure_cleans_storage(self):
+        storage = Mock()
+        storage.delete.return_value = True
+        self.client.cookies.set("safety_session", self.token)
+
+        with (
+            patch("app.services.storage.get_storage", return_value=storage),
+            patch(
+                "app.routers.knowledge.DocumentIndexer.index_document",
+                side_effect=EmbeddingGenerationError("임베딩 실패"),
+            ),
+        ):
+            resp = self.client.post(
+                "/api/knowledge/documents",
+                files={"file": ("safety.txt", b"safety content", "text/plain")},
+                data={"title": "안전 문서"},
+            )
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.json()["detail"], "임베딩 실패")
+        storage.upload.assert_called_once()
+        storage.delete.assert_called_once()
+
     def test_health_endpoint(self):
         resp = self.client.get("/health")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertIn("db", data)
+
+    def test_external_http_redirects_to_https(self):
+        resp = self.client.get(
+            "/health",
+            headers={
+                "host": "example.trycloudflare.com",
+                "x-forwarded-proto": "http",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 307)
+        self.assertEqual(resp.headers["location"], "https://example.trycloudflare.com/health")
+
+    def test_external_https_has_security_headers(self):
+        resp = self.client.get(
+            "/health",
+            headers={
+                "host": "example.trycloudflare.com",
+                "x-forwarded-proto": "https",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(resp.headers["x-frame-options"], "DENY")
+        self.assertIn("default-src 'self'", resp.headers["content-security-policy"])
+        self.assertIn("max-age=31536000", resp.headers["strict-transport-security"])
+
+
+class TestRagQuery(unittest.TestCase):
+    def test_known_event_uses_korean_safety_terms(self):
+        query = rag_query_for_event("no_helmet")
+        self.assertIn("안전모 미착용", query)
+        self.assertNotIn("no_helmet", query)
+
+    def test_unknown_event_removes_internal_underscores(self):
+        query = rag_query_for_event("custom_hazard")
+        self.assertIn("custom hazard", query)
+        self.assertNotIn("custom_hazard", query)
 
 
 if __name__ == "__main__":

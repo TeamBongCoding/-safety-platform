@@ -70,9 +70,12 @@ function OverviewTab({ onError, riskConfig }) {
   }, [horizon, onError])
 
   useEffect(() => {
-    load()
+    const timer = window.setTimeout(load, 0)
     const interval = window.setInterval(() => load(false), Math.max(1, riskConfig.refresh_seconds) * 1000)
-    return () => window.clearInterval(interval)
+    return () => {
+      window.clearTimeout(timer)
+      window.clearInterval(interval)
+    }
   }, [load, riskConfig.refresh_seconds])
 
   const overallStyle = RISK_LEVEL_STYLE[data?.overall_risk_level] || RISK_LEVEL_STYLE.low
@@ -167,7 +170,10 @@ function ReportTab({ onError, riskConfig }) {
     }
   }, [horizon, eventType])
 
-  useEffect(() => { loadLatest() }, [loadLatest])
+  useEffect(() => {
+    const timer = window.setTimeout(loadLatest, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadLatest])
 
   const generate = async () => {
     setGenerating(true)
@@ -406,7 +412,10 @@ function EpisodesTab({ onError }) {
     }
   }, [showResolved, onError])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(load, 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const doResolve = async (id) => {
     try {
@@ -506,7 +515,10 @@ function KnowledgeTab({ onError }) {
     }
   }, [onError])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(load, 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const upload = async (e) => {
     e.preventDefault()

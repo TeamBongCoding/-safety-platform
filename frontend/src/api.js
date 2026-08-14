@@ -39,11 +39,12 @@ export function cameraUploadUrl(cameraId) {
 }
 
 export async function api(path, options = {}) {
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     ...options,
     headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
   })
@@ -111,6 +112,5 @@ export function uploadDocument(formData) {
   return api('/api/knowledge/documents', {
     method: 'POST',
     body: formData,
-    headers: {},  // multipart; no Content-Type override
   })
 }

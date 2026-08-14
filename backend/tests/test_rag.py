@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import DocumentChunk, KnowledgeDocument
 from app.services.rag.embedding import MockEmbeddingProvider
-from app.services.rag.indexer import DocumentIndexer, chunk_text
+from app.services.rag.indexer import DocumentIndexer, EmbeddingGenerationError, chunk_text
 from app.services.rag.retriever import KnowledgeRetriever
 
 
@@ -82,6 +82,18 @@ class TestDocumentIndexer(unittest.TestCase):
         content2 = "안전 지침 v2 업데이트".encode("utf-8")
         doc_id2 = self.indexer.index_document(1, "가이드", "test", "1.0", content2, "guide.txt")
         self.assertEqual(doc_id1, doc_id2)
+
+    def test_embedding_failure_does_not_save_document(self):
+        with self.assertLogs("app.services.rag.indexer", level="ERROR"):
+            with patch.object(self.provider, "encode", side_effect=RuntimeError("model failed")):
+                with self.assertRaises(EmbeddingGenerationError):
+                    self.indexer.index_document(
+                        1, "실패 문서", "test", "1.0", b"content", "failed.txt"
+                    )
+
+        with self.session_factory() as db:
+            self.assertEqual(db.query(KnowledgeDocument).count(), 0)
+            self.assertEqual(db.query(DocumentChunk).count(), 0)
 
     def test_delete_document(self):
         doc_id = self.indexer.index_document(1, "삭제용", "test", "1.0", b"content", "del.txt")

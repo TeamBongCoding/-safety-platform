@@ -61,8 +61,11 @@ class KnowledgeRetriever:
         provider = self._provider()
         query_vec = provider.encode_one(query)
 
-        from ...config import DATABASE_URL
-        if DATABASE_URL.startswith("sqlite"):
+        # 설정 문자열이 아니라 이 retriever가 실제로 사용하는 세션의
+        # dialect를 확인한다. 테스트/도구에서 별도 SQLite 세션을 주입할 수 있다.
+        with self._session_factory() as db:
+            dialect_name = db.get_bind().dialect.name
+        if dialect_name == "sqlite":
             return self._search_sqlite(query_vec, site_id, k, thr, embedding_model_filter)
         return self._search_pgvector(query_vec, site_id, k, thr, embedding_model_filter)
 
@@ -76,24 +79,31 @@ class KnowledgeRetriever:
 
         vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
 
-        sql = """
+        filters = ["dc.embedding IS NOT NULL"]
+        params = {"vec": vec_str, "k": top_k}
+        if site_id is not None:
+            filters.append("dc.site_id = :site_id")
+            params["site_id"] = site_id
+        if model_filter:
+            filters.append("dc.embedding_model = :model")
+            params["model"] = model_filter
+        where_sql = "\n              AND ".join(filters)
+
+        sql = f"""
             SELECT
                 dc.id,
                 dc.document_id,
                 kd.title,
                 dc.section,
                 dc.content,
-                1 - (dc.embedding <=> :vec::vector) AS similarity,
+                1 - (dc.embedding <=> CAST(:vec AS vector)) AS similarity,
                 dc.embedding_model
             FROM document_chunks dc
             JOIN knowledge_documents kd ON kd.id = dc.document_id
-            WHERE (:site_id IS NULL OR dc.site_id = :site_id)
-              AND dc.embedding IS NOT NULL
-              AND (:model IS NULL OR dc.embedding_model = :model)
-            ORDER BY dc.embedding <=> :vec::vector
+            WHERE {where_sql}
+            ORDER BY dc.embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """
-        params = {"vec": vec_str, "site_id": site_id, "k": top_k, "model": model_filter}
 
         try:
             with self._session_factory() as db:

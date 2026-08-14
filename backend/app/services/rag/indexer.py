@@ -21,6 +21,10 @@ CHUNK_SIZE = 500        # 글자 수
 CHUNK_OVERLAP = 50
 
 
+class EmbeddingGenerationError(RuntimeError):
+    """문서 임베딩을 만들 수 없어 인덱싱을 완료하지 못한 경우."""
+
+
 def allowed_extension(filename: str) -> bool:
     suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     return suffix in ALLOWED_EXTENSIONS
@@ -111,6 +115,16 @@ class DocumentIndexer:
 
         provider = self._get_provider()
 
+        # 임베딩 생성이 실패한 문서를 정상 처리된 것처럼 저장하면 이후 검색에서
+        # 영구적으로 누락된다. DB를 변경하기 전에 실패시켜 원자성을 보장한다.
+        try:
+            embeddings = provider.encode(chunks)
+        except Exception as exc:
+            logger.exception("임베딩 생성 실패")
+            raise EmbeddingGenerationError(
+                "문서 임베딩 생성에 실패했습니다. 서버의 AI 모델 설정을 확인해 주세요."
+            ) from exc
+
         with self._session_factory() as db:
             # 같은 현장+제목+버전이 있으면 청크만 교체
             from sqlalchemy import select
@@ -142,13 +156,6 @@ class DocumentIndexer:
                 )
                 db.add(doc)
                 db.flush()
-
-            # 임베딩 생성
-            try:
-                embeddings = provider.encode(chunks)
-            except Exception as exc:
-                logger.error("임베딩 생성 실패: %s", exc)
-                embeddings = [None] * len(chunks)
 
             for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                 db_chunk = DocumentChunk(

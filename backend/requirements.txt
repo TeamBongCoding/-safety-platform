@@ -5,6 +5,9 @@ sqlalchemy
 psycopg[binary]
 opencv-python-headless
 ultralytics
+torch>=2.6,<2.7
+torchvision>=0.21,<0.22
+sentence-transformers>=5.7,<6.0
 shapely
 python-dotenv
 pillow
