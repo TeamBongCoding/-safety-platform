@@ -1,7 +1,5 @@
 ﻿[CmdletBinding()]
-param(
-    [switch]$WithAnalyzer
-)
+param()
 
 $ErrorActionPreference = "Stop"
 
@@ -97,10 +95,6 @@ function Wait-ForBackend {
 
 try {
     $backendCommand = "python -m uvicorn app.main:app --host $backendHost --port $backendPort --reload"
-    if ($WithAnalyzer) {
-        $backendCommand = '$env:ANALYSIS_ENABLED = "1"; ' + $backendCommand
-    }
-
     $processes.Add(
         (Start-Component `
             -Title "Safety Backend" `

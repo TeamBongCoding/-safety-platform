@@ -92,7 +92,7 @@ bash deploy/jupyterhub/install.sh
 nano .env
 ```
 
-AI 분석을 켜려면 모델을 팀 컨테이너에 한 번 준비합니다.
+영상 분석을 사용하려면 모델을 팀 컨테이너에 한 번 준비합니다.
 
 ```bash
 mkdir -p backend/weights
@@ -102,9 +102,9 @@ cd backend
 cd ..
 ```
 
-그런 다음 `.env`의 `ANALYSIS_ENABLED=1`로 변경합니다. `best.pt`, `*.pth`, SQLite DB와
-`.env`는 Git에서 제외되므로 `git pull`을 해도 유지됩니다. GPU가 있으면 `REID_DEVICE=auto`가
-자동으로 CUDA를 선택합니다.
+`best.pt`, `*.pth`, SQLite DB와 `.env`는 Git에서 제외되므로 `git pull`을 해도 유지됩니다.
+GPU가 있으면 `REID_DEVICE=auto`가 자동으로 CUDA를 선택합니다. 로그인 후 브라우저 카메라를
+설정하거나 녹화 영상을 업로드하면 분석이 시작됩니다.
 
 위험 보고서의 LLM 설명을 켜려면 로컬 모델을 설치하는 대신 해커톤에서 제공하는 `openai`
 SDK와 API 키를 사용합니다. 루트 `.env`에 다음 값을 입력하세요.
@@ -231,7 +231,7 @@ git ls-remote origin
 | 외부 URL이 표시되지 않음 | 학교 outbound 방화벽이 Cloudflare Tunnel 연결을 막는지 확인; named tunnel이면 `.env`의 `PUBLIC_URL` 확인 |
 | URL은 열리지만 로그인 유지 안 됨 | `.env`의 `COOKIE_SECURE=1` 확인 후 서비스 재시작 |
 | 카메라 권한이 거부됨 | 반드시 cloudflared의 HTTPS URL로 접속하고 브라우저 사이트 권한 재설정 |
-| AI 분석이 시작되지 않음 | `ANALYSIS_ENABLED`, 모델 경로, `nvidia-smi`, 서비스 로그 확인 |
+| AI 분석이 시작되지 않음 | 카메라 또는 녹화 영상 연결, 모델 경로, `nvidia-smi`, 서비스 로그 확인 |
 | LLM 설명 대신 기본 보고서가 표시됨 | `OPENAI_ENABLED=1`, `OPENAI_API_KEY`, `OPENAI_MODEL`과 서비스 로그 확인 |
 | `update.sh`가 변경 파일 때문에 중단됨 | 배포 계정에서 직접 수정하지 말고 개인 계정에서 commit/push; 필요한 배포 전용 값은 `.env`에만 저장 |
 | `git pull` 인증 실패 | 위 GitHub 인증 절차를 사용하고 `gh auth status`로 캐시 상태 확인 |

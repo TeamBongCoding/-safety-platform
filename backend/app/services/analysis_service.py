@@ -16,7 +16,6 @@ from shapely.geometry import Polygon
 from sqlalchemy import func, select
 
 from ..config import (
-    ANALYSIS_ENABLED,
     EVENT_EPISODE_CLOSE_GAP_SEC,
     EVENT_EPISODE_MIN_DURATION_SEC,
     EVENT_EPISODE_UPDATE_INTERVAL_SEC,
@@ -26,7 +25,6 @@ from ..config import (
     POSE_INFER_EVERY,
     PROJECT_ROOT,
     RULE_VERSION,
-    VIDEO_SOURCE,
 )
 from ..database import SessionLocal
 from ..models import Event, Site, User, Zone
@@ -35,10 +33,10 @@ from .episode_aggregator import EpisodeAggregator, ExposureAccumulator
 from .person_tracking import CameraPersonTracker, HeatExposureTracker
 from .pose_detector import pose_detector
 
-DEFAULT_VIDEO_PATH = PROJECT_ROOT / "data" / "videos" / "site1.mp4"
 INFER_EVERY = 3
 EVENT_COOLDOWN_SECONDS = 10
 ZONE_REFRESH_SECONDS = 1
+INPUT_REQUIRED_MESSAGE = "카메라를 설정하거나 녹화된 영상을 업로드해 주세요."
 
 
 def should_persist_event(event: dict) -> bool:
@@ -91,7 +89,7 @@ class AnalysisService:
         self._status = {
             "running": False,
             "stage": "stopped",
-            "message": "분석이 시작되지 않았습니다.",
+            "message": INPUT_REQUIRED_MESSAGE,
             "source": None,
             "frame_index": 0,
             "processing_fps": 0.0,
@@ -102,11 +100,11 @@ class AnalysisService:
             "last_error": None,
         }
 
-    def start(self, video_path: str | None = None):
+    def start(self, video_path: str):
         if self._thread and self._thread.is_alive():
             return
 
-        source = Path(video_path or VIDEO_SOURCE or DEFAULT_VIDEO_PATH)
+        source = Path(video_path)
         if not source.is_absolute():
             source = (PROJECT_ROOT / source).resolve()
 
@@ -199,7 +197,11 @@ class AnalysisService:
         pose_behavior_detector.reset()
         self._episode_aggregator.flush()
         self._exposure_accumulator.flush()
-        self._set_status(running=False, stage="stopped", message="분석이 중지되었습니다.")
+        self._set_status(
+            running=False,
+            stage="stopped",
+            message=INPUT_REQUIRED_MESSAGE,
+        )
 
     def get_frame(self):
         with self._lock:
@@ -566,8 +568,6 @@ class AnalysisRegistry:
                 service._heat_service = heat_service
         if external:
             service.start_external()
-        elif ANALYSIS_ENABLED:
-            service.start(source)
         return service
 
     def current(self, site_id: int) -> "AnalysisService | None":

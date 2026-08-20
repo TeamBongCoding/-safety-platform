@@ -27,9 +27,7 @@ def normalize_database_url(value: str) -> str:
     return value
 
 
-ANALYSIS_ENABLED = os.getenv("ANALYSIS_ENABLED", "0") == "1"
 KMA_API_KEY = os.getenv("KMA_API_KEY")
-VIDEO_SOURCE = os.getenv("VIDEO_SOURCE")
 
 # Supabase exposes standard PostgreSQL URLs, while this project installs the
 # modern psycopg v3 driver. Make copied dashboard URLs work without requiring

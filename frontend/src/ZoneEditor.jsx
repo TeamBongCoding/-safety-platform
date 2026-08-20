@@ -68,6 +68,7 @@ export default function ZoneEditor({
   streamAlt,
   streamReady,
   waitingMessage,
+  inputRequired,
   streamError,
   onStreamLoad,
   onStreamError,
@@ -726,9 +727,17 @@ export default function ZoneEditor({
 
         {!streamReady && (
           <div className="absolute inset-0 z-30 grid place-items-center bg-slate-950/95 text-center">
-            <div>
-              <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+            <div className="px-6">
+              {inputRequired ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="mx-auto mb-4 h-12 w-12 text-cyan-400">
+                  <path d="M15 10l4.6-2.3A1 1 0 0121 8.6v6.8a1 1 0 01-1.4.9L15 14M5 6h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M9 9v6m-3-3h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+              )}
               <p className="font-medium text-slate-300">{waitingMessage}</p>
+              {inputRequired && <p className="mt-2 text-sm text-slate-500">위의 카메라 / 영상 입력에서 분석할 소스를 선택할 수 있습니다.</p>}
               {streamError && <p className="mt-2 max-w-md text-sm text-red-300">{streamError}</p>}
             </div>
           </div>

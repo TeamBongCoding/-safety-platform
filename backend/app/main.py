@@ -114,17 +114,6 @@ async def ws_camera_upload(ws: WebSocket):
     finally:
         service.detach_external_camera()
         analysis_registry.stop_site(site_id)
-        # 현장이 여전히 존재하고 현재 선택된 경우에만 파일 기반 분석으로 복귀한다.
-        with SessionLocal() as db:
-            current_user = user_from_token(session_token, db)
-            site_still_active = bool(
-                current_user
-                and current_user.current_site_id == site_id
-                and db.scalar(select(Site.id).where(Site.id == site_id))
-            )
-        if site_still_active:
-            heat_svc2 = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
-            analysis_registry.get(site_id, is_outdoor=is_outdoor, heat_service=heat_svc2)
 
 
 @app.websocket("/ws")

@@ -191,6 +191,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   const [cautionTemp, setCautionTemp] = useState(31.0)
   const [warningTemp, setWarningTemp] = useState(33.0)
   const [severeTemp, setSevereTemp] = useState(38.0)
+  const handleStreamingChange = useCallback((isStreaming) => {
+    setCameraStreaming(isStreaming)
+    if (!isStreaming) setStreamReady(false)
+  }, [])
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
@@ -396,10 +400,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
     if (!connected) return '서버 연결 대기'
     if (summary?.analysis_stage === 'loading') return 'AI 모델 준비 중'
     if (summary?.analysis_stage === 'waiting_camera' || summary?.analysis_stage === 'waiting_frame') return '카메라 연결 대기'
-    if (summary?.analysis_stage === 'camera_disconnected') return '카메라 연결 종료'
+    if (summary?.analysis_stage === 'camera_disconnected') return '입력 대기'
     if (summary?.analysis_stage === 'error') return '분석 오류'
     if (summary?.analysis_running) return '영상 분석 중'
-    return '분석 중지됨'
+    return '입력 대기'
   }, [connected, summary])
 
   if (!currentSite) {
@@ -567,7 +571,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
 
-        <BrowserCameraController onStreamingChange={setCameraStreaming} />
+        <BrowserCameraController onStreamingChange={handleStreamingChange} />
 
         {heatStatus && (
           <HeatSection
@@ -601,8 +605,8 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
                 <p className="text-xs text-slate-500">{currentSite?.name} · 사람 추적 · 안전모 · 위험구역 판정</p>
               </div>
               {cameraStreaming
-                ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">LIVE</span>
-                : <span className="rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300">RECORDED</span>
+                ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">분석 중</span>
+                : <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold tracking-wider text-slate-400">입력 대기</span>
               }
             </div>
             <ZoneEditor
@@ -612,14 +616,15 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
               streamSrc={`${API_BASE}/api/analysis/stream`}
               streamAlt={`${currentSite?.name} AI 영상 분석`}
               streamReady={streamReady}
-              waitingMessage={summary?.analysis_message ?? '영상 스트림을 기다리고 있습니다.'}
+              waitingMessage={summary?.analysis_message ?? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.'}
+              inputRequired={!summary || summary.analysis_stage === 'stopped' || summary.analysis_stage === 'camera_disconnected'}
               streamError={summary?.last_error}
               onStreamLoad={handleStreamLoad}
               onStreamError={handleStreamError}
               onRequestError={handleUnauthorized}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
-              <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '브라우저 카메라 실시간 분석' : '녹화 영상 분석'}</span>
+              <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '선택한 영상 분석 중' : '카메라 또는 녹화 영상 입력 대기'}</span>
               <span>단일 카메라 추적 · {summary?.processing_fps ?? 0} FPS</span>
             </div>
           </div>
@@ -639,10 +644,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
                 <EmptyState text={
                   !connected ? '서버 연결 중...' :
                   !summary ? '분석 상태 불러오는 중...' :
-                  summary.analysis_stage === 'stopped' ? '분석이 시작되지 않았습니다.' :
+                  summary.analysis_stage === 'stopped' ? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.' :
                   summary.analysis_stage === 'loading' ? 'AI 모델 준비 중...' :
                   (summary.analysis_stage === 'waiting_camera' || summary.analysis_stage === 'waiting_frame') ? '카메라 연결을 기다리는 중...' :
-                  summary.analysis_stage === 'camera_disconnected' ? '카메라 연결이 종료되었습니다.' :
+                  summary.analysis_stage === 'camera_disconnected' ? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.' :
                   summary.analysis_stage === 'error' ? `분석 오류: ${summary.last_error ?? ''}` :
                   '현재 감지된 작업자가 없습니다.'
                 } />

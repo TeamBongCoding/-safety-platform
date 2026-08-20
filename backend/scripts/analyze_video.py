@@ -51,4 +51,7 @@ def main(video_path: str, out_path: str = "output.mp4"):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "../data/videos/site1.mp4")
+    if len(sys.argv) < 2:
+        raise SystemExit("사용법: python -m scripts.analyze_video <video_path>")
+
+    main(sys.argv[1])
