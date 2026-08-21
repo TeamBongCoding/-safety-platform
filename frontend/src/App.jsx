@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import BrowserCameraController from './BrowserCameraController'
+import BleSerialController from './BleSerialController'
 import RiskDashboard from './RiskDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
@@ -147,7 +148,7 @@ function Dashboard({ session, setSession, onShowRisk }) {
   const [connected, setConnected] = useState(false)
   const [summary, setSummary] = useState(null)
   const [events, setEvents] = useState([])
-  const [streamReady, setStreamReady] = useState(false)
+  const [streamReady, setStreamReady] = useState({ 'camera-1': false, 'camera-2': false })
   const [newSiteName, setNewSiteName] = useState('')
   const [newSiteLat, setNewSiteLat] = useState('')
   const [newSiteLon, setNewSiteLon] = useState('')
@@ -157,7 +158,8 @@ function Dashboard({ session, setSession, onShowRisk }) {
   const [demoTemp, setDemoTemp] = useState('')
   const [showDemoControls, setShowDemoControls] = useState(false)
   const [showCamSettings, setShowCamSettings] = useState(false)
-  const [cameraStreaming, setCameraStreaming] = useState(false)
+  const [cameraStreaming, setCameraStreaming] = useState({ 'camera-1': false, 'camera-2': false })
+  const [cameraDeviceIds, setCameraDeviceIds] = useState({ 'camera-1': '', 'camera-2': '' })
   const [confirmDeleteSite, setConfirmDeleteSite] = useState(false)
   const [deleteSiteId, setDeleteSiteId] = useState('')
   const [sunThreshold, setSunThreshold] = useState(1.15)
@@ -165,18 +167,36 @@ function Dashboard({ session, setSession, onShowRisk }) {
   const [cautionTemp, setCautionTemp] = useState(31.0)
   const [warningTemp, setWarningTemp] = useState(33.0)
   const [severeTemp, setSevereTemp] = useState(38.0)
-  const handleStreamingChange = useCallback((isStreaming) => {
-    setCameraStreaming(isStreaming)
-    if (!isStreaming) setStreamReady(false)
+  const handleStreamingChange = useCallback((cameraId, isStreaming) => {
+    setCameraStreaming((current) => ({ ...current, [cameraId]: isStreaming }))
+    if (!isStreaming) {
+      setStreamReady((current) => ({ ...current, [cameraId]: false }))
+    }
   }, [])
+  const handleCameraDeviceSelection = useCallback((cameraId, deviceId) => {
+    setCameraDeviceIds((current) => ({ ...current, [cameraId]: deviceId }))
+  }, [])
+  const anyCameraStreaming = Object.values(cameraStreaming).some(Boolean)
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
     else setNotice(error.message)
   }, [setSession])
 
-  const handleStreamLoad = useCallback(() => setStreamReady(true), [])
-  const handleStreamError = useCallback(() => setStreamReady(false), [])
+  const handleStreamLoad = useCallback((cameraId) => {
+    setStreamReady((current) => ({ ...current, [cameraId]: true }))
+  }, [])
+  const handleStreamError = useCallback((cameraId) => {
+    setStreamReady((current) => ({ ...current, [cameraId]: false }))
+  }, [])
+  const resetCameraCalibration = async () => {
+    try {
+      await api('/api/analysis/calibration/reset', { method: 'POST' })
+      setNotice('카메라 배치 학습을 초기화했습니다. 두 화면 사이를 한 번 걸어 주세요.')
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
 
   // 체감온도 상태 30초 폴링 — 서버 임계값으로 로컬 상태 초기화
   useEffect(() => {
@@ -544,7 +564,31 @@ function Dashboard({ session, setSession, onShowRisk }) {
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
 
-        <BrowserCameraController onStreamingChange={handleStreamingChange} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <BrowserCameraController
+            cameraId="camera-1"
+            title="카메라 A"
+            preferredDeviceIndex={0}
+            unavailableDeviceIds={[cameraDeviceIds['camera-2']].filter(Boolean)}
+            onDeviceSelectionChange={handleCameraDeviceSelection}
+            onStreamingChange={handleStreamingChange}
+          />
+          <BrowserCameraController
+            cameraId="camera-2"
+            title="카메라 B"
+            preferredDeviceIndex={1}
+            unavailableDeviceIds={[cameraDeviceIds['camera-1']].filter(Boolean)}
+            onDeviceSelectionChange={handleCameraDeviceSelection}
+            onStreamingChange={handleStreamingChange}
+          />
+        </div>
+
+        <BleSerialController
+          key={currentSite?.id}
+          tags={summary?.ble_tags ?? []}
+          workers={summary?.workers ?? []}
+          onRequestError={handleUnauthorized}
+        />
 
         {heatStatus && (
           <HeatSection
@@ -572,33 +616,73 @@ function Dashboard({ session, setSession, onShowRisk }) {
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20">
-            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
               <div>
-                <h2 className="font-semibold text-white">현장 분석 영상</h2>
-                <p className="text-xs text-slate-500">{currentSite?.name} · 사람 추적 · 안전모 · 위험구역 판정</p>
+                <h2 className="font-semibold text-white">현장 분석 영상 · 카메라 2대</h2>
+                <p className="text-xs text-slate-500">{currentSite?.name} · 카메라 간 전역 ID · BLE 근접도 보정</p>
               </div>
-              {cameraStreaming
-                ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">분석 중</span>
-                : <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold tracking-wider text-slate-400">입력 대기</span>
-              }
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold text-slate-300">
+                  {summary?.camera_layout?.mode === 'overlap'
+                    ? '겹치는 구도'
+                    : summary?.camera_layout?.mode === 'separate'
+                      ? '분리된 구도'
+                      : '구도 학습 중'}
+                  {summary?.camera_layout?.confidence
+                    ? ' · ' + Math.round(summary.camera_layout.confidence * 100) + '%'
+                    : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetCameraCalibration}
+                  className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-semibold text-slate-400 hover:border-cyan-500 hover:text-cyan-300"
+                >
+                  배치 다시 학습
+                </button>
+                {anyCameraStreaming
+                  ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">분석 중</span>
+                  : <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold tracking-wider text-slate-400">입력 대기</span>
+                }
+              </div>
             </div>
-            <ZoneEditor
-              key={currentSite?.id}
-              siteId={currentSite?.id}
-              streamKey={currentSite?.id}
-              streamSrc={`${API_BASE}/api/analysis/stream`}
-              streamAlt={`${currentSite?.name} AI 영상 분석`}
-              streamReady={streamReady}
-              waitingMessage={summary?.analysis_message ?? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.'}
-              inputRequired={!summary || summary.analysis_stage === 'stopped' || summary.analysis_stage === 'camera_disconnected'}
-              streamError={summary?.last_error}
-              onStreamLoad={handleStreamLoad}
-              onStreamError={handleStreamError}
-              onRequestError={handleUnauthorized}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
-              <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '선택한 영상 분석 중' : '카메라 또는 녹화 영상 입력 대기'}</span>
-              <span>단일 카메라 추적 · {summary?.processing_fps ?? 0} FPS</span>
+
+            <div className="grid gap-px bg-slate-800 xl:grid-cols-2">
+              {[
+                { cameraId: 'camera-1', label: '카메라 A' },
+                { cameraId: 'camera-2', label: '카메라 B' },
+              ].map(({ cameraId, label }) => {
+                const cameraSummary = summary?.cameras?.find((camera) => camera.camera_id === cameraId)
+                return (
+                  <div key={cameraId} className="bg-slate-900">
+                    <div className="flex items-center justify-between px-4 py-2 text-xs">
+                      <span className="font-semibold text-slate-300">{label}</span>
+                      <span className={cameraStreaming[cameraId] ? 'text-emerald-300' : 'text-slate-600'}>
+                        {cameraStreaming[cameraId] ? '연결됨' : '입력 대기'}
+                      </span>
+                    </div>
+                    <ZoneEditor
+                      key={(currentSite?.id ?? 'site') + '-' + cameraId}
+                      siteId={currentSite?.id}
+                      streamKey={(currentSite?.id ?? 'site') + '-' + cameraId}
+                      streamSrc={API_BASE + '/api/analysis/stream?camera_id=' + cameraId}
+                      streamAlt={(currentSite?.name ?? '') + ' ' + label + ' AI 영상 분석'}
+                      streamReady={streamReady[cameraId]}
+                      waitingMessage={cameraStreaming[cameraId]
+                        ? '첫 분석 프레임을 기다리고 있습니다.'
+                        : label + '를 설정하거나 녹화 영상을 업로드해 주세요.'}
+                      inputRequired={!cameraStreaming[cameraId]}
+                      streamError={cameraSummary?.last_error ?? summary?.last_error}
+                      onStreamLoad={() => handleStreamLoad(cameraId)}
+                      onStreamError={() => handleStreamError(cameraId)}
+                      onRequestError={handleUnauthorized}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
+                      <span>프레임 #{cameraSummary?.frame_index ?? 0}</span>
+                      <span>{cameraSummary?.worker_count ?? 0}명 · {cameraSummary?.processing_fps ?? 0} FPS</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -717,6 +801,11 @@ function WorkerCard({ worker }) {
       </div>
       <p className="mt-3 text-xs text-slate-400">위치 · {worker.zone}</p>
       <p className="mt-1 text-xs text-slate-400">객체 품질 · {Math.round((worker.image_quality ?? 0) * 100)}%</p>
+      {worker.ble_tag_key && (
+        <p className="mt-1 text-xs font-medium text-violet-300">
+          BLE 태그 · Minor {worker.ble_tag_key.split(':').at(-1)}
+        </p>
+      )}
       {worker.strong_rest_needed ? (
         <p className="mt-2 rounded-md bg-red-500/20 px-2 py-1.5 text-xs font-bold text-red-300">
           강력 휴식 권고 — 폭염구역 누적 20초 이상

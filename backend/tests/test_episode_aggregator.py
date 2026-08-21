@@ -158,6 +158,27 @@ class TestEpisodeStart(unittest.TestCase):
         self.assertEqual(agg.open_episode_count(), 1)
         self.assertEqual(len(rows), 1)  # still same episode, no new INSERT
 
+    def test_long_episode_uses_constant_size_running_confidence_stats(self):
+        agg, _rows, clock = _make_aggregator(update_interval=100_000.0)
+        values = [0.2, 0.8] * 5_000
+
+        for confidence in values:
+            agg.process_events([{
+                "type": "fall",
+                "confidence": confidence,
+                "site_id": 1,
+            }])
+
+        episode = next(iter(agg._open.values()))
+        self.assertFalse(hasattr(episode, "confidence_values"))
+        self.assertEqual(episode.observation_count, 10_000)
+        self.assertAlmostEqual(episode.confidence_min, 0.2)
+        self.assertAlmostEqual(episode.confidence_max, 0.8)
+        self.assertAlmostEqual(
+            episode.confidence_sum / episode.observation_count,
+            0.5,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

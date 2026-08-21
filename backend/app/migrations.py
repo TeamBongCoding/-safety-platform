@@ -105,11 +105,11 @@ def _migrate_postgresql(engine) -> None:
         "users": [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_ephemeral BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
         ],
         "sites": [
             "ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude FLOAT",
@@ -121,7 +121,7 @@ def _migrate_postgresql(engine) -> None:
             "ALTER TABLE zones ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE zones ADD COLUMN IF NOT EXISTS precautions TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE zones ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT TRUE",
-            "ALTER TABLE zones ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
+            "ALTER TABLE zones ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE",
         ],
         "events": [
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS site_id INTEGER REFERENCES sites(id)",
@@ -171,6 +171,40 @@ def _migrate_postgresql(engine) -> None:
         vector_exists = True
     if not vector_exists:
         execute_ddl("CREATE EXTENSION IF NOT EXISTS vector", "pgvector extension")
+
+    # Normalize legacy naive timestamps to timezone-aware UTC. Existing rows are
+    # interpreted according to the historical convention used by each column.
+    timestamp_columns = {
+        "users": {"last_login_at": "UTC", "suspended_at": "UTC", "last_seen_at": "UTC", "expires_at": "UTC", "created_at": "UTC"},
+        "sites": {"created_at": "UTC"},
+        "login_sessions": {"expires_at": "UTC", "created_at": "UTC"},
+        "admin_audit_logs": {"created_at": "UTC"},
+        "zones": {"updated_at": "UTC"},
+        "events": {"timestamp": "Asia/Seoul"},
+        "event_episodes": {"started_at": "UTC", "ended_at": "UTC", "created_at": "UTC", "updated_at": "UTC"},
+        "risk_predictions": {"generated_at": "UTC", "valid_until": "UTC"},
+        "knowledge_documents": {"created_at": "UTC"},
+        "document_chunks": {"created_at": "UTC"},
+    }
+    try:
+        with engine.begin() as conn:
+            for table_name, columns in timestamp_columns.items():
+                if table_name not in existing_tables:
+                    continue
+                for column_name, timezone_name in columns.items():
+                    row = conn.execute(text("""
+                        SELECT data_type FROM information_schema.columns
+                        WHERE table_schema = current_schema() AND table_name = :table_name
+                          AND column_name = :column_name
+                    """), {"table_name": table_name, "column_name": column_name}).first()
+                    if row and row[0] == "timestamp without time zone":
+                        conn.execute(text(
+                            f'ALTER TABLE "{table_name}" ALTER COLUMN "{column_name}" '
+                            f"TYPE TIMESTAMP WITH TIME ZONE USING \"{column_name}\" AT TIME ZONE '{timezone_name}'"
+                        ))
+                        logger.info("PostgreSQL migration: normalized %s.%s as %s", table_name, column_name, timezone_name)
+    except Exception as exc:
+        logger.warning("PostgreSQL timestamp normalization skipped: %s", exc)
 
     for table_name, stmts in alterations.items():
         if table_name not in existing_tables:

@@ -19,7 +19,7 @@ from .config import (
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Site
-from .routers import analysis, auth, events, heat, knowledge, risk, sites, zones
+from .routers import analysis, auth, ble, events, heat, knowledge, risk, sites, zones
 from .services.analysis_service import analysis_registry
 from .services.heat_service import heat_registry
 from .services.demo_accounts import count_active_demo_users, purge_expired_demo_users
@@ -67,6 +67,7 @@ app.include_router(sites.router)
 app.include_router(events.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
+app.include_router(ble.router)
 app.include_router(heat.router)
 app.include_router(risk.router)
 app.include_router(knowledge.router)
@@ -84,9 +85,12 @@ def health():
     }
 
 
-@app.websocket("/ws/camera-upload")
-async def ws_camera_upload(ws: WebSocket):
-    """브라우저에서 캡처한 JPEG 프레임을 수신하여 영상 분석 서비스에 주입합니다."""
+async def _camera_upload_session(ws: WebSocket, camera_id: str):
+    """Receive one browser camera stream without stopping the other stream."""
+    if camera_id not in {"camera-1", "camera-2"}:
+        await ws.close(code=4404, reason="지원하지 않는 카메라 ID입니다.")
+        return
+
     session_token = ws.cookies.get(SESSION_COOKIE_NAME)
     with SessionLocal() as db:
         user = user_from_token(session_token, db)
@@ -108,13 +112,16 @@ async def ws_camera_upload(ws: WebSocket):
         site_lon = site.longitude
 
     heat_svc = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
-    # 기존 파일 기반 서비스를 중지하고 외부 카메라 서비스로 전환
-    analysis_registry.stop_site(site_id)
-    service = analysis_registry.get(site_id, source="browser", is_outdoor=is_outdoor, heat_service=heat_svc)
+    service = analysis_registry.get(
+        site_id,
+        source="browser",
+        is_outdoor=is_outdoor,
+        heat_service=heat_svc,
+    )
 
     await ws.accept()
-    if not service.attach_external_camera():
-        await ws.close(code=4409, reason="이미 다른 카메라가 연결되어 있습니다.")
+    if not service.attach_external_camera(camera_id):
+        await ws.close(code=4409, reason=f"{camera_id}가 이미 연결되어 있습니다.")
         return
 
     last_auth_check = time.monotonic()
@@ -132,12 +139,25 @@ async def ws_camera_upload(ws: WebSocket):
                         await ws.close(code=4401, reason="세션 또는 현재 현장이 변경되었습니다.")
                         return
                 last_auth_check = now
-            service.submit_jpeg(data)
+            service.submit_jpeg(data, camera_id)
+            await ws.send_json({
+                "type": "frame_ack",
+                "camera_id": camera_id,
+            })
     except WebSocketDisconnect:
         pass
     finally:
-        service.detach_external_camera()
-        analysis_registry.stop_site(site_id)
+        service.detach_external_camera(camera_id)
+
+
+@app.websocket("/ws/camera-upload")
+async def ws_camera_upload_legacy(ws: WebSocket):
+    await _camera_upload_session(ws, "camera-1")
+
+
+@app.websocket("/ws/camera-upload/{camera_id}")
+async def ws_camera_upload(ws: WebSocket, camera_id: str):
+    await _camera_upload_session(ws, camera_id)
 
 
 @app.websocket("/ws")

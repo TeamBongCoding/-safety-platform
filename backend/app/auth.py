@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .config import COOKIE_SECURE, SESSION_COOKIE_NAME
 from .database import get_db
 from .models import LoginSession, Site, User
+from .time_utils import utc_now
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -31,7 +32,7 @@ def start_session(
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
-        max_age=max(1, int((expires_at - datetime.now()).total_seconds())),
+        max_age=max(1, int((expires_at - utc_now()).total_seconds())),
         httponly=True,
         secure=COOKIE_SECURE,
         samesite="lax",
@@ -45,12 +46,12 @@ def user_from_token(token: str | None, db: Session) -> User | None:
     login_session = db.get(LoginSession, _token_hash(token))
     if not login_session:
         return None
-    if login_session.expires_at <= datetime.now():
+    if login_session.expires_at <= utc_now():
         db.delete(login_session)
         db.commit()
         return None
     user = db.get(User, login_session.user_id)
-    now = datetime.now()
+    now = utc_now()
     if (
         not user
         or not user.is_ephemeral

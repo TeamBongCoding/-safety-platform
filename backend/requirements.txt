@@ -9,7 +9,9 @@ sqlalchemy
 psycopg[binary]
 opencv-python-headless
 numpy>=2
-ultralytics
+ultralytics>=8.4.118,<8.5
+lap>=0.5.12
+scipy>=1.10,<2
 shapely
 python-dotenv
 pillow

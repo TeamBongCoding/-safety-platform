@@ -18,6 +18,7 @@ from ..database import get_db
 from ..models import Site, User
 from ..schemas import SessionOut
 from ..services.demo_accounts import purge_demo_user, purge_expired_demo_users
+from ..time_utils import utc_now
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 _admission_lock = Lock()
@@ -52,7 +53,7 @@ def start_demo(request: Request, response: Response, db: Session = Depends(get_d
     purge_expired_demo_users(session_factory=make_session)
     db.rollback()
 
-    now = datetime.now()
+    now = utc_now()
     idle_cutoff = now - timedelta(minutes=DEMO_IDLE_MINUTES)
     with _admission_lock:
         _lock_demo_admission(db)
@@ -106,7 +107,7 @@ def me(user: User = Depends(require_user), db: Session = Depends(get_db)):
 
 @router.post("/heartbeat")
 def heartbeat(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    user.last_seen_at = datetime.now()
+    user.last_seen_at = utc_now()
     db.commit()
     return {"active": True, "expires_at": user.expires_at}
 

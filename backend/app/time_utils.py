@@ -1,41 +1,77 @@
-"""Korean Standard Time helpers for persisted and API-visible timestamps."""
+"""UTC persistence and Korean Standard Time API serialization helpers."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+
+from sqlalchemy import DateTime
+from sqlalchemy.types import TypeDecorator
 
 
+UTC = timezone.utc
 KST = timezone(timedelta(hours=9), name="KST")
 
 
+def as_utc(value: datetime) -> datetime:
+    """Normalize aware or legacy UTC-naive values to aware UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def kst_now() -> datetime:
-    """Return an aware current timestamp in Korean Standard Time."""
-    return datetime.now(KST)
+    return utc_now().astimezone(KST)
 
 
-def kst_now_naive() -> datetime:
-    """Return KST without tzinfo for the existing naive SQLite columns."""
-    return kst_now().replace(tzinfo=None)
-
-
-def kst_today():
+def kst_today() -> date:
     return kst_now().date()
 
 
+def kst_day_start_utc(day: date | None = None) -> datetime:
+    """Return KST midnight converted to the UTC instant used by the DB."""
+    selected = day or kst_today()
+    return datetime.combine(selected, time.min, tzinfo=KST).astimezone(UTC)
+
+
+def utc_to_kst_isoformat(value: datetime) -> str:
+    """Serialize a persisted UTC timestamp with an explicit +09:00 offset."""
+    return as_utc(value).astimezone(KST).isoformat()
+
+
+# Compatibility aliases now follow the single UTC persistence rule.
 def kst_isoformat(value: datetime) -> str:
-    """Serialize a stored event timestamp with an explicit +09:00 offset."""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=KST)
-    else:
-        value = value.astimezone(KST)
-    return value.isoformat()
+    return utc_to_kst_isoformat(value)
 
 
 def utc_naive_to_kst_isoformat(value: datetime) -> str:
-    """Convert UTC-backed database timestamps to explicit Korean time.
+    return utc_to_kst_isoformat(value)
 
-    Risk/episode tables historically persist ``datetime.now()`` from the UTC
-    server into timezone-naive columns. Treat those naive values as UTC before
-    converting them, while still handling timezone-aware values correctly.
+
+class UTCDateTime(TypeDecorator):
+    """Return aware UTC datetimes on both PostgreSQL and SQLite.
+
+    PostgreSQL stores ``TIMESTAMP WITH TIME ZONE``. SQLite has no timezone-aware
+    type, so bind values are stored as UTC-naive and restored as aware UTC.
+    Legacy naive Python inputs are interpreted as UTC during the transition.
     """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(KST).isoformat()
+
+    impl = DateTime
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        return dialect.type_descriptor(DateTime(timezone=dialect.name == "postgresql"))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        normalized = as_utc(value)
+        if dialect.name == "sqlite":
+            return normalized.replace(tzinfo=None)
+        return normalized
+
+    def process_result_value(self, value, _dialect):
+        if value is None:
+            return None
+        return as_utc(value)

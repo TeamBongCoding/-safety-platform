@@ -28,12 +28,19 @@ def process_frame(
     pose_detections=None,
     timestamp=None,
     render_overlay=True,
+    detections_fresh=True,
+    identity_resolver=None,
 ):
     persons = [d for d in detections if d["cls"] == "person"]
     helmets = [d["box"] for d in detections if d["cls"] == "helmet"]
     uncovered_heads = [d["box"] for d in detections if d["cls"] == "no-helmet"]
     now = time.monotonic() if timestamp is None else timestamp
-    tracks = tracker.update(frame, persons, w, h, timestamp=now)
+    if detections_fresh or not hasattr(tracker, "predict"):
+        tracks = tracker.update(frame, persons, w, h, timestamp=now)
+    else:
+        tracks = tracker.predict(timestamp=now)
+    if identity_resolver is not None:
+        tracks = identity_resolver(tracks, now)
 
     heat_level = heat_status.level if heat_status is not None else "inactive"
     sun_threshold = heat_status.sun_threshold if heat_status is not None else 1.15
@@ -147,6 +154,7 @@ def process_frame(
                 else behavior_result.label if behavior_result else "정상"
             ),
             "behavior_risk_score": behavior_result.risk_score if behavior_result else 0,
+            "ble_tag_key": track.ble_tag_key,
         })
 
     if render_overlay and pose_detections:

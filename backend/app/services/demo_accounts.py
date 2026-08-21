@@ -18,6 +18,7 @@ from ..config import (
     SUPABASE_DOCUMENT_BUCKET,
     SUPABASE_SNAPSHOT_BUCKET,
 )
+from ..time_utils import utc_now
 from ..models import (
     AdminAuditLog,
     DocumentChunk,
@@ -245,7 +246,7 @@ def purge_expired_demo_users(
     session_factory: SessionFactory | None = None,
 ) -> int:
     make_session = _factory(session_factory)
-    now = datetime.now()
+    now = utc_now()
     idle_cutoff = now - timedelta(minutes=DEMO_IDLE_MINUTES)
     with make_session() as db:
         user_ids = list(db.scalars(
@@ -283,9 +284,9 @@ def touch_demo_user(
                 User.id == user_id,
                 User.is_ephemeral.is_(True),
                 User.status == "active",
-                User.expires_at > datetime.now(),
+                User.expires_at > utc_now(),
             )
-            .values(last_seen_at=datetime.now())
+            .values(last_seen_at=utc_now())
         )
         db.commit()
         return bool(result.rowcount)
@@ -296,7 +297,7 @@ def count_active_demo_users(
     session_factory: SessionFactory | None = None,
 ) -> int:
     make_session = _factory(session_factory)
-    now = datetime.now()
+    now = utc_now()
     idle_cutoff = now - timedelta(minutes=DEMO_IDLE_MINUTES)
     with make_session() as db:
         return int(db.scalar(

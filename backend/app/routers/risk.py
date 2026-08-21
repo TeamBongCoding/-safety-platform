@@ -16,6 +16,7 @@ from ..database import get_db
 from ..models import RiskPrediction, Site
 from ..schemas import RiskOverviewOut, RiskReportOut, RiskResultOut
 from ..services.risk_engine import get_risk_engine, result_to_dict
+from ..time_utils import utc_now
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ def get_risk_overview(
         raise HTTPException(status_code=422, detail="horizon은 24h 또는 7d만 허용됩니다.")
 
     # 가장 최근 예측 결과 조회 (valid_until 이내)
-    now = datetime.now()
+    now = utc_now()
     rows = db.scalars(
         select(RiskPrediction).where(
             RiskPrediction.site_id == site.id,
@@ -178,7 +179,7 @@ def get_risk_overview(
         results=[RiskResultOut(**r) for r in result_dicts],
         overall_risk_level=overall_level,
         overall_risk_score=overall_score,
-        generated_at=datetime.now(),
+        generated_at=utc_now(),
     )
 
 
@@ -202,7 +203,7 @@ def list_predictions(
     site: Site = Depends(require_current_site),
     db: Session = Depends(get_db),
 ):
-    now = datetime.now()
+    now = utc_now()
     rows = db.scalars(
         select(RiskPrediction).where(
             RiskPrediction.site_id == site.id,
@@ -373,9 +374,9 @@ def get_latest_report(
 def _persist_predictions(db, site_id: int, horizon: str, results) -> None:
     from ..services.risk_engine import result_to_dict
     if RISK_WINDOW_MODE == "demo":
-        valid_until = datetime.now() + timedelta(seconds=RISK_REFRESH_SECONDS)
+        valid_until = utc_now() + timedelta(seconds=RISK_REFRESH_SECONDS)
     else:
-        valid_until = datetime.now() + timedelta(hours=1 if horizon == "24h" else 6)
+        valid_until = utc_now() + timedelta(hours=1 if horizon == "24h" else 6)
     for r in results:
         d = result_to_dict(r)
         pred = RiskPrediction(
@@ -392,7 +393,7 @@ def _persist_predictions(db, site_id: int, horizon: str, results) -> None:
             factors_json=json.dumps([f for f in d["factors"]], ensure_ascii=False),
             limitations_json=json.dumps(r.limitations, ensure_ascii=False),
             model_version=r.model_version,
-            generated_at=datetime.now(),
+            generated_at=utc_now(),
             valid_until=valid_until,
         )
         db.add(pred)

@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
-from .time_utils import kst_now_naive
+from .time_utils import UTCDateTime, utc_now
 from .config import DATABASE_URL, EMBEDDING_DIM
 
 
@@ -33,11 +33,11 @@ class User(Base):
         ForeignKey("sites.id"), nullable=True
     )
     is_ephemeral: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    suspended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    suspended_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class Site(Base):
@@ -48,15 +48,15 @@ class Site(Base):
     is_outdoor: Mapped[bool] = mapped_column(Boolean, default=False)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
 
 
 class LoginSession(Base):
     __tablename__ = "login_sessions"
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
 
 
 class AdminAuditLog(Base):
@@ -68,7 +68,7 @@ class AdminAuditLog(Base):
     target_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, index=True)
 
 
 class Zone(Base):
@@ -82,7 +82,7 @@ class Zone(Base):
     precautions: Mapped[str] = mapped_column(Text, default="")
     visible: Mapped[bool] = mapped_column(Boolean, default=True)
     polygon: Mapped[str] = mapped_column(Text)           # 0~1 정규화 좌표 JSON 문자열
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
 
 class Event(Base):
@@ -90,7 +90,7 @@ class Event(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
     track_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=kst_now_naive, index=True)
+    timestamp: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, index=True)
     event_type: Mapped[str] = mapped_column(String(30))  # no_helmet | zone_intrusion | fall | heat_fall …
     zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id"), nullable=True)
     snapshot_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -107,8 +107,8 @@ class EventEpisode(Base):
     track_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     event_type: Mapped[str] = mapped_column(String(50), index=True)
     zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id"), nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     duration_sec: Mapped[float] = mapped_column(Float, default=0.0)
     severity: Mapped[str] = mapped_column(String(20), default="medium")
     confidence_min: Mapped[float] = mapped_column(Float, default=0.0)
@@ -122,8 +122,8 @@ class EventEpisode(Base):
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
 
 class ExposureHourly(Base):
@@ -132,7 +132,7 @@ class ExposureHourly(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
     camera_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    bucket_start: Mapped[datetime] = mapped_column(DateTime, index=True)
+    bucket_start: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     observed_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     worker_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     max_concurrent_workers: Mapped[int] = mapped_column(Integer, default=0)
@@ -158,8 +158,8 @@ class RiskPrediction(Base):
     limitations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_version: Mapped[str] = mapped_column(String(50), default="1.0")
-    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
-    valid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, index=True)
+    valid_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class KnowledgeDocument(Base):
@@ -174,7 +174,7 @@ class KnowledgeDocument(Base):
     storage_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
 
 
 class DocumentChunk(Base):
@@ -190,4 +190,4 @@ class DocumentChunk(Base):
     embedding_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # embedding: Vector(dim) on PostgreSQL, JSON list on SQLite
     embedding = Column(_EMBEDDING_TYPE, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)

@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, NamedTuple
+from ..time_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ class OpenEpisode:
     started_at: float          # monotonic
     started_dt: datetime
     last_seen: float           # monotonic
-    confidence_values: list[float] = field(default_factory=list)
+    confidence_min: float = 0.0
+    confidence_max: float = 0.0
+    confidence_sum: float = 0.0
     observation_count: int = 0
     last_db_update: float = 0.0
     db_id: int | None = None   # None until first INSERT
@@ -116,7 +119,9 @@ class EpisodeAggregator:
             if key in self._open:
                 ep = self._open[key]
                 ep.last_seen = now
-                ep.confidence_values.append(conf)
+                ep.confidence_min = min(ep.confidence_min, conf)
+                ep.confidence_max = max(ep.confidence_max, conf)
+                ep.confidence_sum += conf
                 ep.observation_count += 1
                 if now - ep.last_db_update >= self._update_interval:
                     self._upsert_episode(ep, now, close=False)
@@ -125,9 +130,11 @@ class EpisodeAggregator:
                 ep = OpenEpisode(
                     key=key,
                     started_at=now,
-                    started_dt=datetime.now(),
+                    started_dt=utc_now(),
                     last_seen=now,
-                    confidence_values=[conf],
+                    confidence_min=conf,
+                    confidence_max=conf,
+                    confidence_sum=conf,
                     observation_count=1,
                     last_db_update=now,
                 )
@@ -172,11 +179,10 @@ class EpisodeAggregator:
                     logger.warning("Failed to delete short episode %s: %s", ep.db_id, exc)
             return
 
-        conf_vals = ep.confidence_values or [0.0]
-        conf_min = min(conf_vals)
-        conf_max = max(conf_vals)
-        conf_avg = sum(conf_vals) / len(conf_vals)
-        ended_at = datetime.now() if close else None
+        conf_min = ep.confidence_min
+        conf_max = ep.confidence_max
+        conf_avg = ep.confidence_sum / max(1, ep.observation_count)
+        ended_at = utc_now() if close else None
 
         try:
             with self._session_factory() as db:
@@ -211,7 +217,7 @@ class EpisodeAggregator:
                         row.confidence_avg = round(conf_avg, 4)
                         row.confidence_max = round(conf_max, 4)
                         row.observation_count = ep.observation_count
-                        row.updated_at = datetime.now()
+                        row.updated_at = utc_now()
                         db.commit()
         except Exception as exc:
             logger.error("EpisodeAggregator DB error: %s", exc)
@@ -257,7 +263,7 @@ class ExposureAccumulator:
         from datetime import datetime
         now = self._now()
         if self._bucket_start is None:
-            self._bucket_start = datetime.now()
+            self._bucket_start = utc_now()
 
         self._obs_sec += frame_dt
         self._worker_sec += worker_count * frame_dt

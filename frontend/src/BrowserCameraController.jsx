@@ -1,15 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { WS_URL } from './api'
+import { cameraUploadUrl } from './api'
 
-const FRAME_INTERVAL_MS = 67
-const MAX_BUFFERED_BYTES = 300_000
-const UPLOAD_WIDTH = 512
+const FRAME_INTERVAL_MS = 100
+const MAX_BUFFERED_BYTES = 64_000
+const ACK_TIMEOUT_MS = 1500
+const UPLOAD_WIDTH = 320
 
-function cameraUploadWsUrl() {
-  return WS_URL.replace(/\/ws\/?$/, '') + '/ws/camera-upload'
+const CAMERA_PROFILES = [
+  { width: { exact: 320 }, height: { exact: 240 }, frameRate: { ideal: 10, max: 10 } },
+  { width: { ideal: 320, max: 320 }, height: { ideal: 240, max: 240 }, frameRate: { ideal: 10, max: 10 } },
+]
+
+async function openUsbCamera(deviceId) {
+  let lastError
+  for (const profile of CAMERA_PROFILES) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId }, ...profile },
+        audio: false,
+      })
+    } catch (error) {
+      lastError = error
+      if (error?.name === 'NotAllowedError' || error?.name === 'NotReadableError') throw error
+    }
+  }
+  throw lastError
 }
 
-export default function BrowserCameraController({ onStreamingChange }) {
+export default function BrowserCameraController({
+  cameraId = 'camera-1',
+  title = '카메라 A',
+  preferredDeviceIndex = 0,
+  unavailableDeviceIds = [],
+  onDeviceSelectionChange,
+  onStreamingChange,
+}) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
@@ -19,6 +44,8 @@ export default function BrowserCameraController({ onStreamingChange }) {
   const frameCounterRef = useRef(0)
   const encodingRef = useRef(false)
   const objectUrlRef = useRef(null)
+  const awaitingAckRef = useRef(false)
+  const ackTimerRef = useRef(null)
 
   const [devices, setDevices] = useState([])
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
@@ -35,7 +62,10 @@ export default function BrowserCameraController({ onStreamingChange }) {
     frameTimerRef.current = null
     statsTimerRef.current = null
     encodingRef.current = false
+    awaitingAckRef.current = false
     frameCounterRef.current = 0
+    window.clearTimeout(ackTimerRef.current)
+    ackTimerRef.current = null
 
     if (socketRef.current) {
       const socket = socketRef.current
@@ -67,12 +97,30 @@ export default function BrowserCameraController({ onStreamingChange }) {
     setError('')
     let permStream = null
     try {
-      permStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      permStream.getTracks().forEach((t) => t.stop())
-      const all = await navigator.mediaDevices.enumerateDevices()
-      const cams = all.filter((d) => d.kind === 'videoinput' && d.deviceId)
+      let all = await navigator.mediaDevices.enumerateDevices()
+      let cams = all.filter((d) => d.kind === 'videoinput' && d.deviceId)
+      if (!cams.some((camera) => camera.label)) {
+        permStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        permStream.getTracks().forEach((track) => track.stop())
+        permStream = null
+        all = await navigator.mediaDevices.enumerateDevices()
+        cams = all.filter((d) => d.kind === 'videoinput' && d.deviceId)
+      }
       setDevices(cams)
-      if (cams.length && !selectedDeviceId) setSelectedDeviceId(cams[0].deviceId)
+      const selectedIsAvailable = cams.some(
+        (cam) => cam.deviceId === selectedDeviceId && !unavailableDeviceIds.includes(cam.deviceId),
+      )
+      if (cams.length && !selectedIsAvailable) {
+        const available = cams.filter((cam) => !unavailableDeviceIds.includes(cam.deviceId))
+        const preferred = cams[preferredDeviceIndex]
+        const next = preferred && !unavailableDeviceIds.includes(preferred.deviceId)
+          ? preferred
+          : available[0]
+        const nextDeviceId = next?.deviceId ?? ''
+        setSelectedDeviceId(nextDeviceId)
+        onDeviceSelectionChange?.(cameraId, nextDeviceId)
+        if (!nextDeviceId) setError('다른 입력에서 사용하지 않는 카메라가 없습니다.')
+      }
       if (!cams.length) setError('연결된 카메라를 찾지 못했습니다.')
     } catch (err) {
       if (permStream) permStream.getTracks().forEach((t) => t.stop())
@@ -93,6 +141,7 @@ export default function BrowserCameraController({ onStreamingChange }) {
       if (
         socket.readyState !== WebSocket.OPEN ||
         socket.bufferedAmount > MAX_BUFFERED_BYTES ||
+        awaitingAckRef.current ||
         encodingRef.current ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
       ) return
@@ -110,8 +159,15 @@ export default function BrowserCameraController({ onStreamingChange }) {
       canvas.toBlob((blob) => {
         encodingRef.current = false
         if (!blob || socket.readyState !== WebSocket.OPEN) return
+        if (socket.bufferedAmount > MAX_BUFFERED_BYTES) return
+        awaitingAckRef.current = true
         socket.send(blob)
         frameCounterRef.current += 1
+        window.clearTimeout(ackTimerRef.current)
+        ackTimerRef.current = window.setTimeout(() => {
+          awaitingAckRef.current = false
+          ackTimerRef.current = null
+        }, ACK_TIMEOUT_MS)
       }, 'image/jpeg', 0.68)
     }, FRAME_INTERVAL_MS)
 
@@ -130,6 +186,10 @@ export default function BrowserCameraController({ onStreamingChange }) {
       setError('이 주소에서는 카메라를 사용할 수 없습니다. HTTPS 또는 localhost로 접속하세요.')
       return
     }
+    if (!testVideo && unavailableDeviceIds.includes(selectedDeviceId)) {
+      setError('다른 카메라 입력에서 이미 선택한 장치입니다. 다른 번호를 선택하세요.')
+      return
+    }
     setError('')
     setStatus('requesting')
 
@@ -140,24 +200,33 @@ export default function BrowserCameraController({ onStreamingChange }) {
         video.src = objectUrlRef.current
         video.loop = true
       } else {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
-          audio: false,
-        })
+        const stream = await openUsbCamera(selectedDeviceId)
         streamRef.current = stream
         video.srcObject = stream
       }
       await video.play()
 
-      const socket = new WebSocket(cameraUploadWsUrl())
+      const socket = new WebSocket(cameraUploadUrl(cameraId))
       socketRef.current = socket
       setStatus('connecting')
 
       socket.onopen = () => {
         if (socketRef.current !== socket) return
         setStatus('streaming')
-        onStreamingChange?.(true)
+        onStreamingChange?.(cameraId, true)
         beginFrameUpload(socket)
+      }
+      socket.onmessage = (event) => {
+        if (socketRef.current !== socket) return
+        try {
+          const message = JSON.parse(event.data)
+          if (message.type !== 'frame_ack') return
+          awaitingAckRef.current = false
+          window.clearTimeout(ackTimerRef.current)
+          ackTimerRef.current = null
+        } catch {
+          // 카메라 업로드 소켓은 frame_ack JSON만 사용한다.
+        }
       }
       socket.onerror = () => {
         if (socketRef.current === socket) setError('서버 연결에 실패했습니다.')
@@ -167,11 +236,14 @@ export default function BrowserCameraController({ onStreamingChange }) {
         socketRef.current = null
         window.clearInterval(frameTimerRef.current)
         window.clearInterval(statsTimerRef.current)
+        window.clearTimeout(ackTimerRef.current)
+        ackTimerRef.current = null
+        awaitingAckRef.current = false
         if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null }
         if (videoRef.current) videoRef.current.srcObject = null
         if (objectUrlRef.current) { URL.revokeObjectURL(objectUrlRef.current); objectUrlRef.current = null }
         setUploadFps(0)
-        onStreamingChange?.(false)
+        onStreamingChange?.(cameraId, false)
         const next = event.code === 1000 ? 'idle' : 'error'
         setStatus(next)
         if (event.code !== 1000) setError(event.reason || '카메라 연결이 종료되었습니다.')
@@ -179,10 +251,10 @@ export default function BrowserCameraController({ onStreamingChange }) {
     } catch (err) {
       releaseResources()
       setStatus('error')
-      onStreamingChange?.(false)
+      onStreamingChange?.(cameraId, false)
       if (err?.name === 'NotAllowedError') setError('카메라 권한이 거부되었습니다.')
       else if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') setError('선택한 카메라를 찾을 수 없습니다. 카메라를 다시 검색하세요.')
-      else if (err?.name === 'NotReadableError') setError('카메라를 열 수 없습니다. 다른 앱에서 사용 중인지 확인하세요.')
+      else if (err?.name === 'NotReadableError') setError('USB 카메라를 열 수 없습니다. 다른 탭·카메라 앱을 모두 닫고 USB 포트를 분리해서 연결하세요.')
       else setError(err?.message || '카메라를 시작하지 못했습니다.')
     }
   }
@@ -192,21 +264,24 @@ export default function BrowserCameraController({ onStreamingChange }) {
     setStatus('idle')
     setUploadFps(0)
     setError('')
-    onStreamingChange?.(false)
+    onStreamingChange?.(cameraId, false)
   }
 
   const isBusy = status === 'requesting' || status === 'connecting'
   const isStreaming = status === 'streaming'
+  const selectedDeviceIndex = devices.findIndex((d) => d.deviceId === selectedDeviceId)
+  const selectedDevice = devices[selectedDeviceIndex]
   const deviceLabel = testVideo?.name
-    || devices.find((d) => d.deviceId === selectedDeviceId)?.label
-    || '카메라'
+    || (selectedDevice
+      ? (selectedDevice.label || 'USB 카메라') + ' · ' + (selectedDeviceIndex + 1)
+      : '카메라')
 
   return (
     <section className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
-          <h2 className="font-semibold text-white">카메라 / 영상 입력</h2>
-          <p className="text-xs text-slate-500">클라이언트 카메라 또는 영상 파일을 선택해 AI 분석합니다.</p>
+          <h2 className="font-semibold text-white">{title} / 영상 입력</h2>
+          <p className="text-xs text-slate-500">{cameraId}에 연결할 USB 카메라 또는 영상 파일을 선택합니다.</p>
         </div>
         {!isStreaming && (
           <button
@@ -240,14 +315,23 @@ export default function BrowserCameraController({ onStreamingChange }) {
         <div className="flex flex-col gap-2">
           <select
             value={selectedDeviceId}
-            onChange={(e) => { setSelectedDeviceId(e.target.value); setTestVideo(null) }}
+            onChange={(e) => {
+              setSelectedDeviceId(e.target.value)
+              setTestVideo(null)
+              onDeviceSelectionChange?.(cameraId, e.target.value)
+            }}
             disabled={isStreaming || isBusy}
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500 disabled:opacity-60"
           >
             <option value="">카메라 장치 선택 (검색 먼저)</option>
             {devices.map((d, i) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `카메라 ${i + 1}`}
+              <option
+                key={d.deviceId}
+                value={d.deviceId}
+                disabled={unavailableDeviceIds.includes(d.deviceId)}
+              >
+                {d.label || 'USB 카메라'} · {i + 1}
+                {unavailableDeviceIds.includes(d.deviceId) ? ' (다른 입력에서 사용 중)' : ''}
               </option>
             ))}
           </select>
@@ -258,7 +342,11 @@ export default function BrowserCameraController({ onStreamingChange }) {
               type="file"
               accept="video/*"
               disabled={isStreaming || isBusy}
-              onChange={(e) => { setTestVideo(e.target.files?.[0] ?? null); setSelectedDeviceId('') }}
+              onChange={(e) => {
+                setTestVideo(e.target.files?.[0] ?? null)
+                setSelectedDeviceId('')
+                onDeviceSelectionChange?.(cameraId, '')
+              }}
               className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-cyan-500/15 file:px-2 file:py-1 file:text-cyan-300"
             />
           </label>

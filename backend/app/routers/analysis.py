@@ -27,13 +27,16 @@ def analysis_status(site: Site = Depends(require_current_site)):
 
 
 @router.get("/stream")
-async def analysis_stream(site: Site = Depends(require_current_site)):
+async def analysis_stream(
+    camera_id: str = "camera-1",
+    site: Site = Depends(require_current_site),
+):
     analysis_service = service_for_site(site)
 
     async def frames():
         last_version = -1
         while True:
-            jpeg, version = analysis_service.get_frame()
+            jpeg, version = analysis_service.get_frame(camera_id)
             if jpeg is not None and version != last_version:
                 last_version = version
                 yield (
@@ -56,13 +59,14 @@ async def _current_frame(
     site: Site,
     original: bool = False,
     after: int | None = None,
+    camera_id: str = "camera-1",
 ) -> Response:
     analysis_service = service_for_site(site)
     for _ in range(50):
         jpeg, version = (
-            analysis_service.get_original_frame()
+            analysis_service.get_original_frame(camera_id)
             if original
-            else analysis_service.get_frame()
+            else analysis_service.get_frame(camera_id)
         )
         if jpeg is not None and (after is None or version != after):
             return Response(
@@ -78,18 +82,30 @@ async def _current_frame(
 
 
 @router.get("/snapshot")
-async def analysis_snapshot(site: Site = Depends(require_current_site)):
-    return await _current_frame(site)
+async def analysis_snapshot(
+    camera_id: str = "camera-1",
+    site: Site = Depends(require_current_site),
+):
+    return await _current_frame(site, camera_id=camera_id)
 
 
 @router.get("/frame")
 async def analysis_frame(
     after: int | None = None,
+    camera_id: str = "camera-1",
     site: Site = Depends(require_current_site),
 ):
-    return await _current_frame(site, after=after)
+    return await _current_frame(site, after=after, camera_id=camera_id)
 
 
 @router.get("/original-frame")
-async def analysis_original_frame(site: Site = Depends(require_current_site)):
-    return await _current_frame(site, original=True)
+async def analysis_original_frame(
+    camera_id: str = "camera-1",
+    site: Site = Depends(require_current_site),
+):
+    return await _current_frame(site, original=True, camera_id=camera_id)
+
+
+@router.post("/calibration/reset")
+def reset_camera_calibration(site: Site = Depends(require_current_site)):
+    return service_for_site(site).reset_camera_layout()

@@ -56,7 +56,8 @@ def main(video_path, out_path="output2.mp4"):
         ok, frame = cap.read()
         if not ok:
             break
-        if frame_index % INFER_EVERY == 0:
+        detections_fresh = frame_index % INFER_EVERY == 0
+        if detections_fresh:
             detections = detector.detect(frame)
         frame, events, _ = process_frame(
             frame,
@@ -66,6 +67,7 @@ def main(video_path, out_path="output2.mp4"):
             height,
             tracker,
             include_status=True,
+            detections_fresh=detections_fresh,
         )
         for event in events:
             print(f"[ALERT] frame {frame_index}: {event['type']}")

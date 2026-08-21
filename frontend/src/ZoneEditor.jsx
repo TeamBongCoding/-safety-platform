@@ -28,6 +28,8 @@ const clamp = (value) => Math.min(1, Math.max(0, value))
 const svgPoints = (points) => points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')
 
 const RECORDING_FPS = 15
+const RECORDING_BITS_PER_SECOND = 1_500_000
+const MEMORY_RECORDING_LIMIT_MS = 10 * 60 * 1000
 
 function recordingMimeType() {
   const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
@@ -36,6 +38,40 @@ function recordingMimeType() {
 
 function recordingExtension(mimeType) {
   return mimeType.includes('mp4') ? 'mp4' : 'webm'
+}
+
+async function selectRecordingTargets(siteId, mimeType, extension, stamp) {
+  if (!window.showSaveFilePicker) return null
+  const baseMimeType = mimeType.split(';')[0] || 'video/webm'
+  const pickerOptions = (description, suggestedName) => ({
+    suggestedName,
+    types: [{
+      description,
+      accept: { [baseMimeType]: [`.${extension}`] },
+    }],
+  })
+  const originalName = `safety-site-${siteId}-${stamp}-original.${extension}`
+  const analysisName = `safety-site-${siteId}-${stamp}-analysis.${extension}`
+  const originalHandle = await window.showSaveFilePicker(
+    pickerOptions('원본 영상', originalName),
+  )
+  const analysisHandle = await window.showSaveFilePicker(
+    pickerOptions('오버레이 분석 영상', analysisName),
+  )
+  const opened = []
+  try {
+    const originalWritable = await originalHandle.createWritable()
+    opened.push(originalWritable)
+    const analysisWritable = await analysisHandle.createWritable()
+    opened.push(analysisWritable)
+    return [
+      { name: originalName, writable: originalWritable },
+      { name: analysisName, writable: analysisWritable },
+    ]
+  } catch (error) {
+    await Promise.allSettled(opened.map((writable) => writable.abort()))
+    throw error
+  }
 }
 
 function formatRecordingTime(seconds) {
@@ -157,7 +193,7 @@ export default function ZoneEditor({
   // 프록시가 장시간 MJPEG 응답을 버퍼링하거나 끊는 경우를 피하기 위해,
   // 서버가 새 프레임을 만들 때까지 기다리는 버전 기반 롱폴링을 사용한다.
   useEffect(() => {
-    if (!streamSrc) return undefined
+    if (!streamSrc || inputRequired) return undefined
     const image = imageRef.current
     if (!image) return undefined
 
@@ -174,8 +210,9 @@ export default function ZoneEditor({
       if (!active) return
       let retryDelay = 0
       try {
+        const separator = frameUrl.includes('?') ? '&' : '?'
         const url = lastVersion
-          ? `${frameUrl}?after=${encodeURIComponent(lastVersion)}`
+          ? `${frameUrl}${separator}after=${encodeURIComponent(lastVersion)}`
           : frameUrl
         const resp = await fetch(url, { credentials: 'include' })
         if (!active) return
@@ -211,7 +248,7 @@ export default function ZoneEditor({
       active = false
       setTimeout(() => revoke(prevBlob), 250)
     }
-  }, [streamSrc, onStreamError, onStreamLoad, updateDisplayRect])
+  }, [streamSrc, inputRequired, onStreamError, onStreamLoad, updateDisplayRect])
 
   useEffect(() => {
     if (!recording) return undefined
@@ -228,6 +265,7 @@ export default function ZoneEditor({
       session.stopping = true
       window.clearInterval(session.drawTimer)
       window.clearTimeout(session.originalPollTimer)
+      window.clearTimeout(session.memoryStopTimer)
       session.recorders.forEach((recorder) => {
         if (recorder.state !== 'inactive') recorder.stop()
       })
@@ -257,6 +295,7 @@ export default function ZoneEditor({
     session.stopping = true
     window.clearInterval(session.drawTimer)
     window.clearTimeout(session.originalPollTimer)
+    window.clearTimeout(session.memoryStopTimer)
     session.recorders.forEach((recorder) => {
       if (recorder.state !== 'inactive') recorder.stop()
     })
@@ -277,7 +316,17 @@ export default function ZoneEditor({
     replaceSavedRecordings([])
     setNotice('원본 영상과 분석 영상을 녹화할 준비를 하고 있습니다.')
 
+    let pendingRecordingTargets = null
     try {
+      const requestedMimeType = recordingMimeType()
+      const fileMimeType = requestedMimeType || 'video/webm'
+      const extension = recordingExtension(fileMimeType)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      if (window.showSaveFilePicker) {
+        setNotice('원본 파일과 오버레이 파일을 저장할 위치를 차례로 선택하세요.')
+      }
+      const recordingTargets = await selectRecordingTargets(siteId, fileMimeType, extension, stamp)
+      pendingRecordingTargets = recordingTargets
       const originalFrame = await fetchOriginalFrame()
       const width = analysisImage.naturalWidth
       const height = analysisImage.naturalHeight
@@ -305,8 +354,9 @@ export default function ZoneEditor({
         await overlayImage.decode()
       }
 
-      const mimeType = recordingMimeType()
-      const options = mimeType ? { mimeType, videoBitsPerSecond: 2_500_000 } : { videoBitsPerSecond: 2_500_000 }
+      const options = requestedMimeType
+        ? { mimeType: requestedMimeType, videoBitsPerSecond: RECORDING_BITS_PER_SECOND }
+        : { videoBitsPerSecond: RECORDING_BITS_PER_SECOND }
       const analysisStream = analysisCanvas.captureStream(RECORDING_FPS)
       const originalStream = originalCanvas.captureStream(RECORDING_FPS)
       const analysisRecorder = new MediaRecorder(analysisStream, options)
@@ -319,46 +369,85 @@ export default function ZoneEditor({
         originalFrame,
         overlayImage,
         overlayUrl,
-        mimeType: analysisRecorder.mimeType || mimeType || 'video/webm',
+        mimeType: analysisRecorder.mimeType || fileMimeType,
+        recordingTargets,
+        originalWrite: Promise.resolve(),
+        analysisWrite: Promise.resolve(),
+        writeError: null,
         stoppedCount: 0,
+        finalizing: false,
         stopping: false,
         discard: false,
         drawTimer: null,
         originalPollTimer: null,
+        memoryStopTimer: null,
       }
       recordingSessionRef.current = session
+      pendingRecordingTargets = null
 
-      analysisRecorder.ondataavailable = (event) => {
-        if (event.data.size) session.analysisChunks.push(event.data)
+      const queueChunk = (kind, event) => {
+        if (!event.data.size) return
+        const isOriginal = kind === 'original'
+        const target = session.recordingTargets?.[isOriginal ? 0 : 1]
+        if (!target) {
+          session[isOriginal ? 'originalChunks' : 'analysisChunks'].push(event.data)
+          return
+        }
+        const writeKey = isOriginal ? 'originalWrite' : 'analysisWrite'
+        session[writeKey] = session[writeKey]
+          .then(() => {
+            if (!session.writeError) return target.writable.write(event.data)
+            return undefined
+          })
+          .catch((error) => { session.writeError ??= error })
       }
-      originalRecorder.ondataavailable = (event) => {
-        if (event.data.size) session.originalChunks.push(event.data)
-      }
-      const finishOne = () => {
-        session.stoppedCount += 1
-        if (session.stoppedCount < 2) return
+
+      analysisRecorder.ondataavailable = (event) => queueChunk('analysis', event)
+      originalRecorder.ondataavailable = (event) => queueChunk('original', event)
+
+      const finalizeRecording = async () => {
+        if (session.finalizing) return
+        session.finalizing = true
+        window.clearTimeout(session.memoryStopTimer)
         session.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()))
         session.originalFrame?.close?.()
         if (session.overlayUrl) URL.revokeObjectURL(session.overlayUrl)
-        if (!session.discard) {
-          const extension = recordingExtension(session.mimeType)
-          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-          const files = [
-            {
-              label: '원본 영상 저장',
-              name: `safety-site-${siteId}-${stamp}-original.${extension}`,
-              url: URL.createObjectURL(new Blob(session.originalChunks, { type: session.mimeType })),
-            },
-            {
-              label: '오버레이 영상 저장',
-              name: `safety-site-${siteId}-${stamp}-analysis.${extension}`,
-              url: URL.createObjectURL(new Blob(session.analysisChunks, { type: session.mimeType })),
-            },
-          ]
-          replaceSavedRecordings(files)
-          setNotice('녹화가 완료되었습니다. 원본 영상과 오버레이 영상을 각각 저장하세요.')
+        try {
+          await Promise.all([session.originalWrite, session.analysisWrite])
+          if (session.recordingTargets) {
+            const shouldAbort = session.discard || session.writeError
+            await Promise.all(session.recordingTargets.map(({ writable }) => (
+              shouldAbort ? writable.abort() : writable.close()
+            )))
+            if (!session.discard) {
+              if (session.writeError) throw session.writeError
+              setNotice('녹화가 완료되어 선택한 원본·오버레이 파일에 저장했습니다.')
+            }
+          } else if (!session.discard) {
+            const files = [
+              {
+                label: '원본 영상 저장',
+                name: `safety-site-${siteId}-${stamp}-original.${extension}`,
+                url: URL.createObjectURL(new Blob(session.originalChunks, { type: session.mimeType })),
+              },
+              {
+                label: '오버레이 영상 저장',
+                name: `safety-site-${siteId}-${stamp}-analysis.${extension}`,
+                url: URL.createObjectURL(new Blob(session.analysisChunks, { type: session.mimeType })),
+              },
+            ]
+            replaceSavedRecordings(files)
+            setNotice('녹화가 완료되었습니다. 원본 영상과 오버레이 영상을 각각 저장하세요.')
+          }
+        } catch (error) {
+          if (!session.discard) setNotice(error.message || '녹화 파일 저장에 실패했습니다.')
+        } finally {
+          if (recordingSessionRef.current === session) recordingSessionRef.current = null
         }
-        if (recordingSessionRef.current === session) recordingSessionRef.current = null
+      }
+      const finishOne = () => {
+        session.stoppedCount += 1
+        if (session.stoppedCount === 2) void finalizeRecording()
       }
       analysisRecorder.onstop = finishOne
       originalRecorder.onstop = finishOne
@@ -392,9 +481,23 @@ export default function ZoneEditor({
       pollOriginal()
       setRecordingSeconds(0)
       setRecording(true)
-      setNotice('원본 영상과 오버레이 영상을 동시에 녹화하고 있습니다.')
+      if (!recordingTargets) {
+        session.memoryStopTimer = window.setTimeout(() => {
+          if (recordingSessionRef.current !== session || session.stopping) return
+          stopRecording()
+          setNotice('브라우저 메모리 보호를 위해 10분에서 녹화를 자동 종료했습니다.')
+        }, MEMORY_RECORDING_LIMIT_MS)
+      }
+      setNotice(recordingTargets
+        ? '원본·오버레이 영상을 선택한 파일에 직접 기록하고 있습니다.'
+        : '원본·오버레이 영상을 녹화하고 있습니다. 이 브라우저에서는 최대 10분까지 녹화됩니다.')
     } catch (error) {
-      setNotice(error.message || '영상 녹화를 시작하지 못했습니다.')
+      if (pendingRecordingTargets) {
+        await Promise.allSettled(pendingRecordingTargets.map(({ writable }) => writable.abort()))
+      }
+      setNotice(error?.name === 'AbortError'
+        ? '파일 선택을 취소해 녹화를 시작하지 않았습니다.'
+        : error.message || '영상 녹화를 시작하지 못했습니다.')
     }
   }
 

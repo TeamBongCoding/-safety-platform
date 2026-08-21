@@ -45,6 +45,10 @@ class UserOut(BaseModel):
     expires_at: datetime | None = None
     last_login_at: datetime | None
 
+    @field_serializer("created_at", "expires_at", "last_login_at")
+    def serialize_dt(self, value: datetime | None) -> str | None:
+        return utc_naive_to_kst_isoformat(value) if value else None
+
     class Config:
         from_attributes = True
 
@@ -99,6 +103,10 @@ class ZoneOut(ZoneCreate):
     id: int
     updated_at: datetime | None = None
 
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, value: datetime | None) -> str | None:
+        return utc_naive_to_kst_isoformat(value) if value else None
+
     class Config:
         from_attributes = True
 
@@ -115,7 +123,7 @@ class EventOut(BaseModel):
 
     @field_serializer("timestamp")
     def serialize_timestamp(self, value: datetime) -> str:
-        return kst_isoformat(value)
+        return utc_naive_to_kst_isoformat(value)
 
     class Config:
         from_attributes = True
@@ -231,9 +239,13 @@ class DocumentOut(BaseModel):
     created_at: datetime
     chunk_count: int = 0
 
-    @field_serializer("effective_date", "created_at")
-    def serialize_dt(self, value: datetime | None) -> str | None:
+    @field_serializer("effective_date")
+    def serialize_effective_date(self, value: datetime | None) -> str | None:
         return kst_isoformat(value) if value else None
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        return utc_naive_to_kst_isoformat(value)
 
     class Config:
         from_attributes = True
