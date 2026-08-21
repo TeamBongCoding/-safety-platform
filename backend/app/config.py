@@ -36,8 +36,11 @@ DATABASE_URL = normalize_database_url(
     os.getenv("DATABASE_URL", "sqlite:///./safety.db")
 )
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
-SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+DEMO_IDLE_MINUTES = max(1, int(os.getenv("DEMO_IDLE_MINUTES", "30")))
+DEMO_MAX_HOURS = max(1, int(os.getenv("DEMO_MAX_HOURS", "2")))
+DEMO_CLEANUP_INTERVAL_SECONDS = max(10, int(os.getenv("DEMO_CLEANUP_INTERVAL_SECONDS", "60")))
+DEMO_MAX_ACTIVE_SESSIONS = max(1, int(os.getenv("DEMO_MAX_ACTIVE_SESSIONS", "5")))
 CORS_ORIGINS = _csv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
@@ -108,9 +111,10 @@ SUPABASE_DOCUMENT_BUCKET = os.getenv("SUPABASE_DOCUMENT_BUCKET", "safety-documen
 SUPABASE_SNAPSHOT_BUCKET = os.getenv("SUPABASE_SNAPSHOT_BUCKET", "event-snapshots")
 SUPABASE_CLIP_BUCKET = os.getenv("SUPABASE_CLIP_BUCKET", "event-clips")
 # ── RAG / Embedding ───────────────────────────────────────────────
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
-EMBEDDING_MODEL_REVISION = os.getenv("EMBEDDING_MODEL_REVISION", "")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
+EMBEDDING_BATCH_SIZE = max(1, min(2048, int(os.getenv("EMBEDDING_BATCH_SIZE", "128"))))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "8"))
 RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.55"))
+RAG_FALLBACK_THRESHOLD = float(os.getenv("RAG_FALLBACK_THRESHOLD", "0.35"))
 # ──────────────────────────────────────────────────────────────────

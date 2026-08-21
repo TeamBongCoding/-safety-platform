@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -25,6 +26,9 @@ class SiteDeletionTests(unittest.TestCase):
             password_hash="test",
             company_name="테스트 건설",
             manager_name="관리자",
+            is_ephemeral=True,
+            last_seen_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(hours=2),
         )
         db.add(user)
         db.flush()
@@ -39,14 +43,17 @@ class SiteDeletionTests(unittest.TestCase):
     @patch("app.routers.sites.analysis_registry.stop_site")
     def test_user_can_delete_last_site(self, stop_analysis, stop_heat):
         db, user, sites = self._user_with_sites(1)
-        result = delete_site(sites[0].id, user, db)
+        deleted_site_id = sites[0].id
+        result = delete_site(deleted_site_id, user, db)
 
         self.assertEqual(result.sites, [])
         self.assertIsNone(result.current_site)
         self.assertIsNone(user.current_site_id)
-        self.assertIsNone(db.get(Site, sites[0].id))
-        stop_analysis.assert_called_once_with(sites[0].id)
-        stop_heat.assert_called_once_with(sites[0].id)
+        self.assertIsNone(db.get(Site, deleted_site_id))
+        self.assertEqual(stop_analysis.call_count, 2)
+        stop_analysis.assert_called_with(deleted_site_id)
+        self.assertEqual(stop_heat.call_count, 2)
+        stop_heat.assert_called_with(deleted_site_id)
         db.close()
 
     @patch("app.routers.sites.heat_registry.stop_site")

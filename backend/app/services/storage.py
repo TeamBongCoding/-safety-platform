@@ -56,8 +56,8 @@ class LocalStorageBackend(StorageBackend):
         dest = self._root / bucket / key
         if dest.exists():
             dest.unlink()
-            return True
-        return False
+        # An already absent object is a successful end state for cleanup retries.
+        return True
 
 
 class SupabaseStorageBackend(StorageBackend):
@@ -106,8 +106,9 @@ def get_storage() -> StorageBackend:
                 _backend = SupabaseStorageBackend(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
                 logger.info("Storage: using Supabase")
             except Exception as exc:
-                logger.warning("Supabase Storage 초기화 실패, 로컬 fallback 사용: %s", exc)
-                _backend = LocalStorageBackend()
+                # Never claim successful cleanup through a local fallback while
+                # private objects may still exist in Supabase.
+                raise RuntimeError(f"Supabase Storage 초기화 실패: {exc}") from exc
         else:
             _backend = LocalStorageBackend()
             logger.info("Storage: using local filesystem")

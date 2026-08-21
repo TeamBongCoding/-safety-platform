@@ -32,6 +32,9 @@ class User(Base):
     current_site_id: Mapped[int | None] = mapped_column(
         ForeignKey("sites.id"), nullable=True
     )
+    is_ephemeral: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

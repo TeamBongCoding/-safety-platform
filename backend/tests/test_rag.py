@@ -3,13 +3,14 @@
 import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import DocumentChunk, KnowledgeDocument
-from app.services.rag.embedding import MockEmbeddingProvider
+from app.services.rag.embedding import MockEmbeddingProvider, OpenAIEmbeddingProvider
 from app.services.rag.indexer import DocumentIndexer, chunk_text
 from app.services.rag.retriever import KnowledgeRetriever
 
@@ -19,6 +20,50 @@ def _make_db():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     return Session
+
+
+class FakeEmbeddingsAPI:
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        data = [
+            SimpleNamespace(index=index, embedding=[float(index + 1)] * kwargs["dimensions"])
+            for index, _text in enumerate(kwargs["input"])
+        ]
+        return SimpleNamespace(data=list(reversed(data)))
+
+
+class TestOpenAIEmbeddingProvider(unittest.TestCase):
+    def test_batches_requests_and_preserves_input_order(self):
+        embeddings_api = FakeEmbeddingsAPI()
+        client = SimpleNamespace(embeddings=embeddings_api)
+        provider = OpenAIEmbeddingProvider(
+            model_name="text-embedding-3-small",
+            dimension=3,
+            batch_size=2,
+            client=client,
+        )
+
+        vectors = provider.encode(["첫째", "둘째", "셋째"])
+
+        self.assertEqual(len(embeddings_api.calls), 2)
+        self.assertEqual(vectors, [[1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [1.0, 1.0, 1.0]])
+        for call in embeddings_api.calls:
+            self.assertEqual(call["model"], "text-embedding-3-small")
+            self.assertEqual(call["dimensions"], 3)
+            self.assertEqual(call["encoding_format"], "float")
+
+    def test_missing_api_key_fails_before_request(self):
+        provider = OpenAIEmbeddingProvider(api_key="")
+        with self.assertRaisesRegex(RuntimeError, "OPENAI_API_KEY"):
+            provider.encode(["안전 지침"])
+
+    def test_rejects_empty_input_text(self):
+        provider = OpenAIEmbeddingProvider(client=SimpleNamespace())
+        with self.assertRaises(ValueError):
+            provider.encode([""])
 
 
 class TestChunking(unittest.TestCase):

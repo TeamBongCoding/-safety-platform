@@ -9,24 +9,6 @@ from pydantic import field_serializer, field_validator
 from .time_utils import kst_isoformat, utc_naive_to_kst_isoformat
 
 
-class SignupRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=255)
-    password: str = Field(min_length=8, max_length=128)
-    company_name: str = Field(min_length=1, max_length=100)
-    manager_name: str = Field(min_length=1, max_length=50)
-    site_name: str = Field(min_length=1, max_length=100)
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class ProfileUpdate(BaseModel):
-    company_name: str = Field(min_length=1, max_length=100)
-    manager_name: str = Field(min_length=1, max_length=50)
-
-
 class SiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     latitude: float | None = None
@@ -59,6 +41,8 @@ class UserOut(BaseModel):
     role: str
     status: str
     created_at: datetime
+    is_ephemeral: bool = False
+    expires_at: datetime | None = None
     last_login_at: datetime | None
 
     class Config:
@@ -69,10 +53,6 @@ class SessionOut(BaseModel):
     user: UserOut
     sites: list[SiteOut]
     current_site: SiteOut | None
-
-
-class AdminDeleteRequest(BaseModel):
-    email: str
 
 
 class ZoneCreate(BaseModel):

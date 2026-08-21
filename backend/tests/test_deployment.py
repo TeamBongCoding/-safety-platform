@@ -36,10 +36,15 @@ class DeploymentConfigurationTests(unittest.TestCase):
             {"name": "status"},
             {"name": "last_login_at"},
             {"name": "suspended_at"},
+            {"name": "is_ephemeral"},
+            {"name": "last_seen_at"},
+            {"name": "expires_at"},
         ]
         inspector.get_indexes.return_value = [
             {"name": "ix_users_role"},
             {"name": "ix_users_status"},
+            {"name": "ix_users_is_ephemeral"},
+            {"name": "ix_users_expires_at"},
         ]
         engine = MagicMock()
         connection = engine.connect.return_value.__enter__.return_value

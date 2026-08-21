@@ -20,8 +20,8 @@ from app.config import (
 from app.database import Base, get_db
 from app.main import app
 from app.models import EventEpisode, LoginSession, Site, User
-from app.routers.risk import _build_rag_query, _diversify_chunks
-from app.auth import hash_password, _token_hash
+from app.routers.risk import _build_rag_query, _diversify_chunks, _select_rag_chunks
+from app.auth import _token_hash
 
 
 def _make_engine():
@@ -37,9 +37,12 @@ def _make_engine():
 def _setup_user(db, email, password, site_name="테스트현장"):
     user = User(
         email=email,
-        password_hash=hash_password(password),
+        password_hash="unused",
         company_name="테스트",
         manager_name="테스터",
+        is_ephemeral=True,
+        last_seen_at=datetime.now(),
+        expires_at=datetime.now() + timedelta(hours=2),
     )
     db.add(user)
     db.flush()
@@ -85,6 +88,29 @@ class TestRagReportHelpers(unittest.TestCase):
         ]
         selected = _diversify_chunks(chunks, limit=4)
         self.assertEqual([chunk.document_id for chunk in selected], [1, 2, 3, 1])
+
+    def test_rag_selection_uses_best_match_when_normal_threshold_is_empty(self):
+        chunks = [
+            SimpleNamespace(document_id=1, similarity=0.52),
+            SimpleNamespace(document_id=2, similarity=0.48),
+        ]
+        selected = _select_rag_chunks(
+            chunks,
+            limit=5,
+            threshold=0.55,
+            fallback_threshold=0.35,
+        )
+        self.assertEqual(selected, [chunks[0]])
+
+    def test_rag_selection_rejects_weak_fallback(self):
+        chunks = [SimpleNamespace(document_id=1, similarity=0.2)]
+        selected = _select_rag_chunks(
+            chunks,
+            limit=5,
+            threshold=0.55,
+            fallback_threshold=0.35,
+        )
+        self.assertEqual(selected, [])
 
 
 class TestRiskAPIAuth(unittest.TestCase):

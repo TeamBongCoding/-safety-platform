@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,7 @@ from ..schemas import RiskOverviewOut, RiskReportOut, RiskResultOut
 from ..services.risk_engine import get_risk_engine, result_to_dict
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
+logger = logging.getLogger(__name__)
 
 _RAG_EVENT_TERMS = {
     "no_helmet": "안전모 미착용 개인보호구 착용 점검",
@@ -78,6 +80,25 @@ def _diversify_chunks(chunks: list, limit: int, per_document: int = 2) -> list:
             if len(selected) == limit:
                 break
     return selected
+
+
+def _select_rag_chunks(
+    chunks: list,
+    limit: int,
+    threshold: float,
+    fallback_threshold: float,
+) -> list:
+    """Apply the normal threshold, with one conservative best-match fallback."""
+    qualified = [
+        chunk for chunk in chunks
+        if float(chunk.similarity) >= threshold
+    ]
+    if qualified:
+        return _diversify_chunks(qualified, limit)
+
+    if chunks and float(chunks[0].similarity) >= fallback_threshold:
+        return [chunks[0]]
+    return []
 
 
 @router.get("/config")
@@ -233,22 +254,34 @@ def generate_report(
     # 2. RAG 검색 (실패해도 계속)
     retrieved = []
     try:
-        from ..services.rag.embedding import get_embedding_provider
         from ..services.rag.retriever import KnowledgeRetriever
-        from ..config import RAG_TOP_K, RAG_THRESHOLD
+        from ..config import RAG_FALLBACK_THRESHOLD, RAG_TOP_K, RAG_THRESHOLD
         from ..database import SessionLocal
 
         retriever = KnowledgeRetriever(
             session_factory=SessionLocal,
             top_k=RAG_TOP_K,
-            threshold=RAG_THRESHOLD,
         )
-        chunks = retriever.search(
+        candidates = retriever.search(
             query=_build_rag_query(event_type, risk_result),
             site_id=site.id,
             top_k=max(RAG_TOP_K * 3, RAG_TOP_K),
+            threshold=-1.0,
         )
-        chunks = _diversify_chunks(chunks, RAG_TOP_K)
+        chunks = _select_rag_chunks(
+            candidates,
+            limit=RAG_TOP_K,
+            threshold=RAG_THRESHOLD,
+            fallback_threshold=RAG_FALLBACK_THRESHOLD,
+        )
+        logger.info(
+            "RAG retrieval: site_id=%s event_type=%s candidates=%d selected=%d top_similarity=%s",
+            site.id,
+            event_type,
+            len(candidates),
+            len(chunks),
+            f"{candidates[0].similarity:.4f}" if candidates else "none",
+        )
         retrieved = [
             {
                 "chunk_id": c.chunk_id,
@@ -260,9 +293,12 @@ def generate_report(
             }
             for c in chunks
         ]
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("RAG 검색 실패: %s", exc)
+    except Exception:
+        logger.exception(
+            "RAG search failed: site_id=%s event_type=%s",
+            site.id,
+            event_type,
+        )
 
     # 3. LLM 호출 (실패 시 fallback)
     from ..services.llm_client import call_llm, fallback_report

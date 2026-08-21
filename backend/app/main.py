@@ -1,6 +1,7 @@
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,23 +9,47 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .auth import user_from_token
-from .config import CORS_ORIGINS, KMA_API_KEY, PROJECT_ROOT, SESSION_COOKIE_NAME
+from .config import (
+    CORS_ORIGINS,
+    DEMO_CLEANUP_INTERVAL_SECONDS,
+    KMA_API_KEY,
+    PROJECT_ROOT,
+    SESSION_COOKIE_NAME,
+)
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Site
-from .routers import admin, analysis, auth, events, heat, knowledge, rankings, risk, sites, zones
+from .routers import analysis, auth, events, heat, knowledge, risk, sites, zones
 from .services.analysis_service import analysis_registry
 from .services.heat_service import heat_registry
+from .services.demo_accounts import count_active_demo_users, purge_expired_demo_users
+
+logger = logging.getLogger(__name__)
 
 migrate_legacy_schema(engine)
 Base.metadata.create_all(bind=engine)
 
 
+async def _demo_cleanup_loop():
+    while True:
+        try:
+            await asyncio.to_thread(purge_expired_demo_users)
+        except Exception:
+            logger.exception("Demo cleanup cycle failed")
+        await asyncio.sleep(DEMO_CLEANUP_INTERVAL_SECONDS)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    analysis_registry.stop_all()
-    heat_registry.stop_all()
+    await asyncio.to_thread(purge_expired_demo_users)
+    cleanup_task = asyncio.create_task(_demo_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        analysis_registry.stop_all()
+        heat_registry.stop_all()
 
 
 app = FastAPI(title="AI 안전관리 플랫폼", lifespan=lifespan)
@@ -38,10 +63,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(admin.router)
 app.include_router(sites.router)
 app.include_router(events.router)
-app.include_router(rankings.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
 app.include_router(heat.router)
@@ -57,6 +80,7 @@ def health():
         "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
         "llm_enabled": OPENAI_ENABLED,
         "llm_provider": "openai" if OPENAI_ENABLED else None,
+        "active_demo_sessions": count_active_demo_users(),
     }
 
 
@@ -67,7 +91,7 @@ async def ws_camera_upload(ws: WebSocket):
     with SessionLocal() as db:
         user = user_from_token(session_token, db)
         if not user:
-            await ws.close(code=4401, reason="로그인이 필요합니다.")
+            await ws.close(code=4401, reason="데모 세션이 필요합니다.")
             return
         site = db.scalar(
             select(Site).where(
@@ -122,10 +146,7 @@ async def ws_endpoint(ws: WebSocket):
     with SessionLocal() as db:
         user = user_from_token(session_token, db)
         if not user:
-            await ws.close(code=4401, reason="로그인이 필요합니다.")
-            return
-        if user.role == "platform_admin":
-            await ws.close(code=4403, reason="서버 관리자 계정은 영상 분석을 사용하지 않습니다.")
+            await ws.close(code=4401, reason="데모 세션이 필요합니다.")
             return
         site = db.scalar(
             select(Site).where(

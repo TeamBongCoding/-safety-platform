@@ -1,15 +1,36 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
+from threading import Lock
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session, sessionmaker
 
-from ..auth import end_session, hash_password, require_user, start_session, verify_password
+from ..auth import require_user, start_session, user_from_token
+from ..config import (
+    DEMO_IDLE_MINUTES,
+    DEMO_MAX_ACTIVE_SESSIONS,
+    DEMO_MAX_HOURS,
+    SESSION_COOKIE_NAME,
+)
 from ..database import get_db
-from ..models import Event, Site, User, Zone
-from ..schemas import LoginRequest, ProfileUpdate, SessionOut, SignupRequest
+from ..models import Site, User
+from ..schemas import SessionOut
+from ..services.demo_accounts import purge_demo_user, purge_expired_demo_users
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+_admission_lock = Lock()
+
+
+def _bound_session_factory(db: Session):
+    return sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+
+
+def _lock_demo_admission(db: Session) -> None:
+    if db.get_bind().dialect.name == "postgresql":
+        # Serialize capacity checks across API workers without adding a lock table.
+        db.execute(text("SELECT pg_advisory_xact_lock(724903118)"))
 
 
 def session_payload(user: User, db: Session) -> SessionOut:
@@ -20,57 +41,62 @@ def session_payload(user: User, db: Session) -> SessionOut:
     return SessionOut(user=user, sites=sites, current_site=current_site)
 
 
-@router.post("/signup", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
-def signup(payload: SignupRequest, response: Response, db: Session = Depends(get_db)):
-    email = payload.email.strip().lower()
-    if "@" not in email:
-        raise HTTPException(status_code=422, detail="올바른 이메일을 입력하세요.")
-    if db.scalar(select(User).where(User.email == email)):
-        raise HTTPException(status_code=409, detail="이미 가입된 이메일입니다.")
+@router.post("/demo", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+def start_demo(request: Request, response: Response, db: Session = Depends(get_db)):
+    existing = user_from_token(request.cookies.get(SESSION_COOKIE_NAME), db)
+    if existing:
+        return session_payload(existing, db)
 
-    is_first_user = (
-        db.scalar(select(func.count(User.id)).where(User.role == "user")) or 0
-    ) == 0
-    user = User(
-        email=email,
-        password_hash=hash_password(payload.password),
-        company_name=payload.company_name.strip(),
-        manager_name=payload.manager_name.strip(),
-        last_login_at=datetime.now(),
-    )
-    db.add(user)
-    db.flush()
-    site = Site(user_id=user.id, name=payload.site_name.strip())
-    db.add(site)
-    db.flush()
-    user.current_site_id = site.id
+    make_session = _bound_session_factory(db)
+    db.rollback()
+    purge_expired_demo_users(session_factory=make_session)
+    db.rollback()
 
-    if is_first_user:
-        db.execute(update(Zone).where(Zone.site_id.is_(None)).values(site_id=site.id))
-        db.execute(update(Event).where(Event.site_id.is_(None)).values(site_id=site.id))
+    now = datetime.now()
+    idle_cutoff = now - timedelta(minutes=DEMO_IDLE_MINUTES)
+    with _admission_lock:
+        _lock_demo_admission(db)
+        active_count = int(db.scalar(
+            select(func.count(User.id)).where(
+                User.is_ephemeral.is_(True),
+                User.status == "active",
+                User.expires_at > now,
+                User.last_seen_at > idle_cutoff,
+            )
+        ) or 0)
+        if active_count >= DEMO_MAX_ACTIVE_SESSIONS:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="현재 데모 사용자가 많습니다. 잠시 후 다시 시도하세요.",
+            )
 
-    db.commit()
-    db.refresh(user)
-    start_session(response, db, user)
+        demo_id = uuid4().hex
+        expires_at = now + timedelta(hours=DEMO_MAX_HOURS)
+        user = User(
+            email=f"demo-{demo_id}@internal.invalid",
+            password_hash=secrets.token_urlsafe(48),
+            company_name=f"데모 클라이언트 {demo_id[:6].upper()}",
+            manager_name="임시 사용자",
+            role="user",
+            status="active",
+            is_ephemeral=True,
+            created_at=now,
+            last_login_at=now,
+            last_seen_at=now,
+            expires_at=expires_at,
+        )
+        db.add(user)
+        db.flush()
+        site = Site(user_id=user.id, name="데모 현장")
+        db.add(site)
+        db.flush()
+        user.current_site_id = site.id
+        db.commit()
+        db.refresh(user)
+
+    start_session(response, db, user, expires_at=expires_at)
     return session_payload(user, db)
-
-
-@router.post("/login", response_model=SessionOut)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == payload.email.strip().lower()))
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="정지된 계정입니다. 서버 관리자에게 문의하세요.")
-    user.last_login_at = datetime.now()
-    db.commit()
-    start_session(response, db, user)
-    return session_payload(user, db)
-
-
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(response: Response, request: Request, db: Session = Depends(get_db)):
-    end_session(response, request, db)
 
 
 @router.get("/me", response_model=SessionOut)
@@ -78,14 +104,27 @@ def me(user: User = Depends(require_user), db: Session = Depends(get_db)):
     return session_payload(user, db)
 
 
-@router.put("/profile", response_model=SessionOut)
-def update_profile(
-    payload: ProfileUpdate,
+@router.post("/heartbeat")
+def heartbeat(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    user.last_seen_at = datetime.now()
+    db.commit()
+    return {"active": True, "expires_at": user.expires_at}
+
+
+@router.delete("/demo")
+def end_demo(
+    response: Response,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    user.company_name = payload.company_name.strip()
-    user.manager_name = payload.manager_name.strip()
-    db.commit()
-    db.refresh(user)
-    return session_payload(user, db)
+    user_id = user.id
+    make_session = _bound_session_factory(db)
+    db.rollback()
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    try:
+        deleted = purge_demo_user(user_id, session_factory=make_session)
+    except Exception:
+        # The account is already blocked and will be retried by the cleanup worker.
+        response.status_code = status.HTTP_202_ACCEPTED
+        return {"deleted": False, "cleanup_pending": True}
+    return {"deleted": deleted, "cleanup_pending": False}

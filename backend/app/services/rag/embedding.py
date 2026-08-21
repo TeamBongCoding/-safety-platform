@@ -1,22 +1,19 @@
-"""EmbeddingProvider 인터페이스와 구현체.
+"""RAG embedding providers.
 
-- SentenceTransformerProvider : BAAI/bge-m3 (lazy loading, HF_HOME 경로 사용)
-- MockEmbeddingProvider       : 테스트용, 모델 다운로드 불필요
+- OpenAIEmbeddingProvider: production provider using the OpenAI Embeddings API.
+- MockEmbeddingProvider: deterministic provider for unit tests.
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from abc import ABC, abstractmethod
+from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 
 class EmbeddingProvider(ABC):
-    """임베딩 벡터를 반환하는 추상 인터페이스."""
+    """Interface for converting text into embedding vectors."""
 
     @property
     @abstractmethod
@@ -30,26 +27,35 @@ class EmbeddingProvider(ABC):
 
     @abstractmethod
     def encode(self, texts: list[str]) -> list[list[float]]:
-        """texts를 임베딩 벡터 목록으로 변환한다."""
         ...
 
     def encode_one(self, text: str) -> list[float]:
         return self.encode([text])[0]
 
 
-class SentenceTransformerProvider(EmbeddingProvider):
-    """sentence-transformers 기반 실제 임베딩 프로바이더 (lazy loading)."""
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """OpenAI Embeddings API provider with bounded batching and validation."""
 
     def __init__(
         self,
-        model_name: str = "BAAI/bge-m3",
+        model_name: str = "text-embedding-3-small",
         dimension: int = 1024,
-        revision: str | None = None,
+        *,
+        api_key: str = "",
+        base_url: str | None = None,
+        timeout: float = 60.0,
+        max_retries: int = 2,
+        batch_size: int = 128,
+        client: Any | None = None,
     ):
         self._model_name = model_name
         self._dimension = dimension
-        self._revision = revision
-        self._model = None
+        self._api_key = api_key
+        self._base_url = base_url
+        self._timeout = timeout
+        self._max_retries = max_retries
+        self._batch_size = max(1, min(batch_size, 2048))
+        self._client = client
 
     @property
     def model_name(self) -> str:
@@ -59,34 +65,59 @@ class SentenceTransformerProvider(EmbeddingProvider):
     def dimension(self) -> int:
         return self._dimension
 
-    def _load(self):
-        if self._model is not None:
-            return
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+        if not self._api_key:
+            raise RuntimeError("OPENAI_API_KEY가 없어 RAG 임베딩을 생성할 수 없습니다.")
         try:
-            from sentence_transformers import SentenceTransformer
-            hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-            cache_dir = os.path.join(hf_home, "sentence_transformers")
-            logger.info("Loading embedding model %s from %s", self._model_name, cache_dir)
-            self._model = SentenceTransformer(
-                self._model_name,
-                cache_folder=cache_dir,
-                revision=self._revision,
-            )
-            logger.info("Embedding model loaded: dim=%d", self._dimension)
+            from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError(
-                "sentence-transformers가 설치되지 않았습니다. "
-                "pip install sentence-transformers"
-            ) from exc
+            raise RuntimeError("OpenAI SDK가 설치되지 않았습니다: pip install openai") from exc
+        self._client = OpenAI(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+        )
+        return self._client
 
     def encode(self, texts: list[str]) -> list[list[float]]:
-        self._load()
-        vectors = self._model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return [v.tolist() for v in vectors]
+        if not texts:
+            return []
+        if any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("임베딩 입력은 비어 있지 않은 문자열이어야 합니다.")
+
+        client = self._get_client()
+        vectors: list[list[float]] = []
+        for offset in range(0, len(texts), self._batch_size):
+            batch = texts[offset : offset + self._batch_size]
+            try:
+                response = client.embeddings.create(
+                    model=self._model_name,
+                    input=batch,
+                    dimensions=self._dimension,
+                    encoding_format="float",
+                )
+            except Exception as exc:
+                raise RuntimeError(f"OpenAI 임베딩 API 호출 실패: {exc}") from exc
+
+            ordered = sorted(response.data, key=lambda item: item.index)
+            batch_vectors = [list(item.embedding) for item in ordered]
+            if len(batch_vectors) != len(batch):
+                raise RuntimeError(
+                    "OpenAI 임베딩 API 응답 개수가 요청한 텍스트 개수와 다릅니다."
+                )
+            if any(len(vector) != self._dimension for vector in batch_vectors):
+                raise RuntimeError(
+                    f"OpenAI 임베딩 차원이 설정값 {self._dimension}과 다릅니다."
+                )
+            vectors.extend(batch_vectors)
+        return vectors
 
 
 class MockEmbeddingProvider(EmbeddingProvider):
-    """단위 테스트용 결정론적 Mock — 모델을 다운로드하지 않는다."""
+    """Deterministic test provider that performs no external API calls."""
 
     def __init__(self, dimension: int = 1024):
         self._dimension = dimension
@@ -102,7 +133,6 @@ class MockEmbeddingProvider(EmbeddingProvider):
     def encode(self, texts: list[str]) -> list[list[float]]:
         results = []
         for text in texts:
-            # 텍스트 해시 기반의 결정론적 벡터
             rng = np.random.default_rng(abs(hash(text)) % (2**31))
             vec = rng.standard_normal(self._dimension).astype(np.float32)
             vec /= np.linalg.norm(vec) + 1e-10
@@ -114,19 +144,32 @@ _provider: EmbeddingProvider | None = None
 
 
 def get_embedding_provider() -> EmbeddingProvider:
-    """싱글톤 EmbeddingProvider를 반환한다. 테스트에서는 set_provider()로 교체 가능."""
+    """Return the singleton production provider; tests may replace it."""
     global _provider
     if _provider is None:
-        from ...config import EMBEDDING_DIM, EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_REVISION
-        _provider = SentenceTransformerProvider(
-            EMBEDDING_MODEL_NAME,
+        from ...config import (
+            EMBEDDING_BATCH_SIZE,
             EMBEDDING_DIM,
-            revision=EMBEDDING_MODEL_REVISION or None,
+            EMBEDDING_MODEL_NAME,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_MAX_RETRIES,
+            OPENAI_TIMEOUT_SEC,
+        )
+
+        _provider = OpenAIEmbeddingProvider(
+            model_name=EMBEDDING_MODEL_NAME,
+            dimension=EMBEDDING_DIM,
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_BASE_URL,
+            timeout=OPENAI_TIMEOUT_SEC,
+            max_retries=OPENAI_MAX_RETRIES,
+            batch_size=EMBEDDING_BATCH_SIZE,
         )
     return _provider
 
 
-def set_embedding_provider(provider: EmbeddingProvider) -> None:
-    """테스트 또는 커스텀 구현 교체용."""
+def set_embedding_provider(provider: EmbeddingProvider | None) -> None:
+    """Replace or reset the singleton provider for tests."""
     global _provider
     _provider = provider

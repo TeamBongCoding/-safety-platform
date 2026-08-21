@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import AdminDashboard from './AdminDashboard'
 import BrowserCameraController from './BrowserCameraController'
-import RankingDashboard from './RankingDashboard'
 import RiskDashboard from './RiskDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
@@ -52,28 +50,33 @@ export default function App() {
 
   if (session === undefined) return <LoadingScreen />
   if (!session) {
-    return <AuthScreen onAuthenticated={setSession} initialError={sessionError} />
-  }
-  if (session.user.role === 'platform_admin') {
-    return <AdminDashboard session={session} setSession={setSession} />
+    return <DemoStartScreen onStarted={setSession} initialError={sessionError} />
   }
   return <UserExperience session={session} setSession={setSession} />
 }
 
 function UserExperience({ session, setSession }) {
   const [screen, setScreen] = useState('dashboard')
-  if (screen === 'ranking') {
-    return (
-      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-[1400px]">
-          <RankingDashboard
-            currentCompany={session.user.company_name}
-            onBack={() => setScreen('dashboard')}
-          />
-        </div>
-      </main>
-    )
-  }
+
+  useEffect(() => {
+    let active = true
+    const heartbeat = () => {
+      api('/api/auth/heartbeat', { method: 'POST' }).catch((error) => {
+        if (active && error.status === 401) setSession(null)
+      })
+    }
+    const timer = window.setInterval(heartbeat, 30_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') heartbeat()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [setSession])
+
   if (screen === 'risk') {
     return (
       <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
@@ -83,27 +86,18 @@ function UserExperience({ session, setSession }) {
       </main>
     )
   }
-  return <Dashboard session={session} setSession={setSession} onShowRanking={() => setScreen('ranking')} onShowRisk={() => setScreen('risk')} />
+  return <Dashboard session={session} setSession={setSession} onShowRisk={() => setScreen('risk')} />
 }
 
-function AuthScreen({ onAuthenticated, initialError }) {
-  const [mode, setMode] = useState('login')
+function DemoStartScreen({ onStarted, initialError }) {
   const [error, setError] = useState(initialError)
   const [submitting, setSubmitting] = useState(false)
 
-  const submit = async (event) => {
-    event.preventDefault()
+  const startDemo = async () => {
     setError('')
     setSubmitting(true)
-    const form = new FormData(event.currentTarget)
-    const payload = Object.fromEntries(form.entries())
-
     try {
-      const nextSession = await api(`/api/auth/${mode}`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
-      onAuthenticated(nextSession)
+      onStarted(await api('/api/auth/demo', { method: 'POST' }))
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -113,48 +107,28 @@ function AuthScreen({ onAuthenticated, initialError }) {
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#07111f] px-4 py-10 text-slate-100">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         <div className="mb-7 text-center">
           <p className="mb-2 text-xs font-semibold tracking-[0.24em] text-cyan-400">SITE SAFETY OPERATIONS</p>
           <h1 className="text-3xl font-bold text-white">AI 안전관리 플랫폼</h1>
-          <p className="mt-2 text-sm text-slate-400">내 현장의 작업자와 위험 상황을 안전하게 관리하세요.</p>
+          <p className="mt-2 text-sm text-slate-400">로그인 없이 독립된 임시 클라이언트 환경을 시작합니다.</p>
         </div>
-
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-black/30">
-          <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-950 p-1">
-            <AuthTab active={mode === 'login'} onClick={() => { setMode('login'); setError('') }}>로그인</AuthTab>
-            <AuthTab active={mode === 'signup'} onClick={() => { setMode('signup'); setError('') }}>회원가입</AuthTab>
-          </div>
-
-          <form className="space-y-4" onSubmit={submit}>
-            {mode === 'signup' && (
-              <>
-                <Field label="회사명" name="company_name" placeholder="예: 세이프 건설" required />
-                <Field label="담당자명" name="manager_name" placeholder="예: 김안전" required />
-                <Field label="첫 현장명" name="site_name" placeholder="예: 서울 물류센터" required />
-              </>
-            )}
-            <Field label="이메일" name="email" type="email" placeholder="manager@company.com" autoComplete="email" required />
-            <Field
-              label="비밀번호"
-              name="password"
-              type="password"
-              minLength="8"
-              placeholder="8자 이상 입력"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              required
-            />
-
-            {error && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
-            >
-              {submitting ? '처리 중...' : mode === 'login' ? '관제센터 로그인' : '계정 만들기'}
-            </button>
-          </form>
+          <h2 className="text-lg font-semibold text-white">클라이언트 데모 모드</h2>
+          <ul className="mt-4 space-y-2 text-sm text-slate-400">
+            <li>• 다른 사용자와 분리된 새 임시 계정과 현장이 할당됩니다.</li>
+            <li>• 종료 버튼을 누르면 영상 분석 기록과 업로드 자료가 삭제됩니다.</li>
+            <li>• 30분 동안 활동이 없거나 시작 후 2시간이 지나면 자동 삭제됩니다.</li>
+          </ul>
+          {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+          <button
+            type="button"
+            onClick={startDemo}
+            disabled={submitting}
+            className="mt-6 w-full rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
+          >
+            {submitting ? '임시 환경 준비 중...' : '클라이언트 데모 시작'}
+          </button>
         </section>
       </div>
     </main>
@@ -168,7 +142,7 @@ const heatLevelMeta = {
   severe: { label: '폭염 심각', color: 'red', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', badge: 'bg-red-500/20 text-red-200' },
 }
 
-function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
+function Dashboard({ session, setSession, onShowRisk }) {
   const currentSite = session.current_site
   const [connected, setConnected] = useState(false)
   const [summary, setSummary] = useState(null)
@@ -379,9 +353,9 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
     }
   }
 
-  const logout = async () => {
+  const endDemo = async () => {
     try {
-      await api('/api/auth/logout', { method: 'POST' })
+      await api('/api/auth/demo', { method: 'DELETE' })
     } finally {
       setSession(null)
     }
@@ -443,7 +417,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             </button>
           </form>
           {notice && <p className="mt-3 text-sm text-red-300">{notice}</p>}
-          <button onClick={logout} className="mt-5 text-sm text-slate-500 hover:text-red-300">로그아웃</button>
+          <button onClick={endDemo} className="mt-5 text-sm text-slate-500 hover:text-red-300">데모 종료</button>
         </section>
       </main>
     )
@@ -457,7 +431,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             <div>
               <p className="mb-1 text-xs font-semibold tracking-[0.22em] text-cyan-400">SITE SAFETY OPERATIONS</p>
               <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">AI 안전관리 관제센터</h1>
-              <p className="mt-1 text-sm text-slate-400">{session.user.company_name} · 담당자 {session.user.manager_name}</p>
+              <p className="mt-1 text-sm text-slate-400">임시 클라이언트 세션 · 종료 시 모든 기록 삭제</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -493,9 +467,8 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
                 )
               )}
               <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
-              <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
               <button onClick={onShowRisk} className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-300 hover:bg-violet-500/20">위험 추세 분석</button>
-              <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
+              <button onClick={endDemo} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">데모 종료</button>
             </div>
           </div>
 
@@ -700,23 +673,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   )
 }
 
-function Field({ label, ...props }) {
-  return (
-    <label className="block text-sm text-slate-300">
-      <span className="mb-1.5 block font-medium">{label}</span>
-      <input {...props} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10" />
-    </label>
-  )
-}
-
-function AuthTab({ active, onClick, children }) {
-  return <button type="button" onClick={onClick} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${active ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>{children}</button>
-}
-
 function LoadingScreen() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#07111f] text-slate-300">
-      <div className="text-center"><div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" /><p>로그인 상태 확인 중...</p></div>
+      <div className="text-center"><div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" /><p>데모 세션 확인 중...</p></div>
     </main>
   )
 }

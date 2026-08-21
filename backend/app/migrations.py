@@ -37,6 +37,9 @@ def _migrate_sqlite(engine) -> None:
             ("status",         "ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'"),
             ("last_login_at",  "ALTER TABLE users ADD COLUMN last_login_at DATETIME"),
             ("suspended_at",   "ALTER TABLE users ADD COLUMN suspended_at DATETIME"),
+            ("is_ephemeral",    "ALTER TABLE users ADD COLUMN is_ephemeral BOOLEAN NOT NULL DEFAULT 0"),
+            ("last_seen_at",    "ALTER TABLE users ADD COLUMN last_seen_at DATETIME"),
+            ("expires_at",      "ALTER TABLE users ADD COLUMN expires_at DATETIME"),
         ],
         "sites": [
             ("latitude",  "ALTER TABLE sites ADD COLUMN latitude FLOAT"),
@@ -82,8 +85,13 @@ def _migrate_sqlite(engine) -> None:
             conn.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)"
             )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_users_is_ephemeral ON users (is_ephemeral)"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_users_expires_at ON users (expires_at)"
+            )
         conn.exec_driver_sql("PRAGMA optimize")
-
 
 # ── PostgreSQL / Supabase ─────────────────────────────────────────────────────
 
@@ -99,6 +107,9 @@ def _migrate_postgresql(engine) -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_ephemeral BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
         ],
         "sites": [
             "ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude FLOAT",
@@ -179,6 +190,8 @@ def _migrate_postgresql(engine) -> None:
         ("exposure_hourly", "ix_exposure_hourly_site_id", "CREATE INDEX IF NOT EXISTS ix_exposure_hourly_site_id ON exposure_hourly (site_id)"),
         ("risk_predictions", "ix_risk_predictions_site_id", "CREATE INDEX IF NOT EXISTS ix_risk_predictions_site_id ON risk_predictions (site_id)"),
         ("knowledge_documents", "ix_knowledge_documents_site_id", "CREATE INDEX IF NOT EXISTS ix_knowledge_documents_site_id ON knowledge_documents (site_id)"),
+        ("users", "ix_users_is_ephemeral", "CREATE INDEX IF NOT EXISTS ix_users_is_ephemeral ON users (is_ephemeral)"),
+        ("users", "ix_users_expires_at", "CREATE INDEX IF NOT EXISTS ix_users_expires_at ON users (expires_at)"),
         ("document_chunks", "ix_document_chunks_document_id", "CREATE INDEX IF NOT EXISTS ix_document_chunks_document_id ON document_chunks (document_id)"),
     ]
     for table_name, index_name, stmt in index_stmts:

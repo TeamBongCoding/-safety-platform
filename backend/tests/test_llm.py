@@ -165,18 +165,28 @@ class TestCallLLMSuccess(unittest.TestCase):
         self.assertEqual(result.citations[0].document_id, 10)
         self.assertEqual(result.citations[0].title, "안전 매뉴얼")
 
-    def test_invalid_recommendation_source_is_cleared(self):
+    def test_invalid_source_is_replaced_with_trusted_document_action(self):
         report = self._make_report()
         report.recommendations[0].source_chunk_id = 9999
+        report.limitations = ["검색된 문서가 없습니다."]
         client = self._make_client(report)
         cfg = LLMConfig(enabled=True, api_key="test-key", timeout_sec=5)
         with patch("app.services.llm_client.OpenAI", return_value=client):
             result = call_llm(_RISK, _CHUNKS, config=cfg)
 
         self.assertIsNotNone(result)
-        self.assertIsNone(result.recommendations[0].source_chunk_id)
-        self.assertTrue(result.recommendations[0].reason.startswith("[AI 자율 제안]"))
-        self.assertTrue(any("유효한 문서 근거" in item for item in result.limitations))
+        self.assertEqual(result.recommendations[0].source_chunk_id, 1)
+        self.assertIn("안전모 착용 필수", result.recommendations[0].reason)
+        self.assertTrue(any(
+            item.source_chunk_id is None
+            and item.reason.startswith("[AI 자율 제안]")
+            for item in result.recommendations[1:]
+        ))
+        self.assertEqual([item.chunk_id for item in result.citations], [1])
+        self.assertFalse(any(
+            "검색된 문서" in item and "없" in item
+            for item in result.limitations
+        ))
 
     def test_hallucinated_citation_removed(self):
         """참조되지 않은 chunk_id는 제거한다."""

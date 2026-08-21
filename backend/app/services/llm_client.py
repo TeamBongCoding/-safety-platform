@@ -175,7 +175,7 @@ def _ground_report_sources(
     report: LLMReport,
     retrieved_chunks: list[dict],
 ) -> LLMReport:
-    """Keep only retrieved sources and rebuild citations from trusted metadata."""
+    """Keep only retrieved sources and guarantee one trusted document action."""
     chunks_by_id = {chunk["chunk_id"]: chunk for chunk in retrieved_chunks}
     valid_chunk_ids = set(chunks_by_id)
 
@@ -187,6 +187,35 @@ def _ground_report_sources(
                 recommendation.reason = f"[AI 자율 제안] {recommendation.reason}"
         else:
             recommendation_chunk_ids.add(recommendation.source_chunk_id)
+
+    if retrieved_chunks:
+        report.limitations = [
+            item
+            for item in report.limitations
+            if not ("검색된 문서" in item and "없" in item)
+        ]
+
+    if retrieved_chunks and not recommendation_chunk_ids:
+        chunk = retrieved_chunks[0]
+        title = str(chunk["title"])
+        excerpt = " ".join(str(chunk.get("content", "")).split())
+        if len(excerpt) > 280:
+            excerpt = excerpt[:280].rstrip() + "..."
+        grounded = Recommendation(
+            priority=1,
+            action=f"{title} 기준 현장 조치 실행",
+            reason=f"[지식문서 근거: {title}] {excerpt}",
+            source_chunk_id=chunk["chunk_id"],
+        )
+        report.recommendations = [grounded, *report.recommendations[:6]]
+        for priority, recommendation in enumerate(report.recommendations, start=1):
+            recommendation.priority = priority
+        recommendation_chunk_ids.add(chunk["chunk_id"])
+        logger.info(
+            "Grounded report with deterministic document action: chunk_id=%s document_id=%s",
+            chunk["chunk_id"],
+            chunk["document_id"],
+        )
 
     requested_citation_ids = {
         citation.chunk_id
@@ -204,11 +233,6 @@ def _ground_report_sources(
         for chunk in retrieved_chunks
         if chunk["chunk_id"] in grounded_ids
     ]
-
-    if retrieved_chunks and not recommendation_chunk_ids:
-        report.limitations.append(
-            "검색된 안전 문서가 있었지만 권고사항에 연결된 유효한 문서 근거가 없습니다."
-        )
     return report
 
 
