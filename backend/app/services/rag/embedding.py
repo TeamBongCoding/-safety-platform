@@ -10,7 +10,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
-from openai import OpenAI
 
 
 class EmbeddingProvider(ABC):
@@ -55,7 +54,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._base_url = base_url
         self._timeout = timeout
         self._max_retries = max_retries
-        self._batch_size = max(1, min(batch_size, 2048))
+        self._batch_size = max(
+            1,
+            min(batch_size, 2048),
+        )
         self._client = client
 
     @property
@@ -69,12 +71,19 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def _get_client(self):
         if self._client is not None:
             return self._client
+
         if not self._api_key:
-            raise RuntimeError("OPENAI_API_KEY가 없어 RAG 임베딩을 생성할 수 없습니다.")
+            raise RuntimeError(
+                "OPENAI_API_KEY가 없어 RAG 임베딩을 생성할 수 없습니다."
+            )
+
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("OpenAI SDK가 설치되지 않았습니다: pip install openai") from exc
+            raise RuntimeError(
+                "OpenAI SDK가 설치되지 않았습니다: pip install openai"
+            ) from exc
+
         self._client = OpenAI(
             api_key=self._api_key,
             base_url=self._base_url,
@@ -86,13 +95,21 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def encode(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if any(not isinstance(value, str) or not value.strip() for value in texts):
-            raise ValueError("임베딩 입력은 비어 있지 않은 문자열이어야 합니다.")
+
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in texts
+        ):
+            raise ValueError(
+                "임베딩 입력은 비어 있지 않은 문자열이어야 합니다."
+            )
 
         client = self._get_client()
         vectors: list[list[float]] = []
+
         for offset in range(0, len(texts), self._batch_size):
             batch = texts[offset : offset + self._batch_size]
+
             try:
                 response = client.embeddings.create(
                     model=self._model_name,
@@ -101,94 +118,36 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                     encoding_format="float",
                 )
             except Exception as exc:
-                raise RuntimeError(f"OpenAI 임베딩 API 호출 실패: {exc}") from exc
+                raise RuntimeError(
+                    f"OpenAI 임베딩 API 호출 실패: {exc}"
+                ) from exc
 
-            ordered = sorted(response.data, key=lambda item: item.index)
-            batch_vectors = [list(item.embedding) for item in ordered]
+            ordered = sorted(
+                response.data,
+                key=lambda item: item.index,
+            )
+            batch_vectors = [
+                list(item.embedding)
+                for item in ordered
+            ]
+
             if len(batch_vectors) != len(batch):
                 raise RuntimeError(
-                    "OpenAI 임베딩 API 응답 개수가 요청한 텍스트 개수와 다릅니다."
+                    "OpenAI 임베딩 API 응답 개수가 "
+                    "요청한 텍스트 개수와 다릅니다."
                 )
-            if any(len(vector) != self._dimension for vector in batch_vectors):
+
+            if any(
+                len(vector) != self._dimension
+                for vector in batch_vectors
+            ):
                 raise RuntimeError(
-                    f"OpenAI 임베딩 차원이 설정값 {self._dimension}과 다릅니다."
+                    f"OpenAI 임베딩 차원이 설정값 "
+                    f"{self._dimension}과 다릅니다."
                 )
+
             vectors.extend(batch_vectors)
-        return vectors
 
-
-class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI Embeddings API를 사용하여 로컬 모델 메모리를 사용하지 않는다."""
-
-    def __init__(
-        self,
-        api_key: str,
-        base_url: str = "https://api.openai.com/v1",
-        model_name: str = "text-embedding-3-small",
-        dimension: int = 1024,
-        timeout_sec: float = 60.0,
-        max_retries: int = 1,
-        batch_size: int = 64,
-    ):
-        self._api_key = api_key
-        self._base_url = base_url.rstrip("/")
-        self._model_name = model_name
-        self._dimension = dimension
-        self._timeout_sec = timeout_sec
-        self._max_retries = max_retries
-        self._batch_size = max(1, batch_size)
-        self._client: Any | None = None
-
-    @property
-    def model_name(self) -> str:
-        # 동일 모델이라도 차원이 다른 벡터는 검색에서 섞으면 안 된다.
-        return f"openai:{self._model_name}:{self._dimension}"
-
-    @property
-    def dimension(self) -> int:
-        return self._dimension
-
-    def _get_client(self) -> OpenAI:
-        if not self._api_key:
-            raise RuntimeError(
-                "OpenAI 임베딩을 사용하려면 OPENAI_API_KEY가 필요합니다."
-            )
-        if self._client is None:
-            self._client = OpenAI(
-                api_key=self._api_key,
-                base_url=self._base_url,
-                timeout=self._timeout_sec,
-                max_retries=self._max_retries,
-            )
-        return self._client
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-
-        client = self._get_client()
-        vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            batch = texts[start : start + self._batch_size]
-            response = client.embeddings.create(
-                model=self._model_name,
-                input=batch,
-                dimensions=self._dimension,
-                encoding_format="float",
-            )
-            items = sorted(response.data, key=lambda item: item.index)
-            if len(items) != len(batch):
-                raise RuntimeError(
-                    "OpenAI 임베딩 응답 개수가 입력 개수와 다릅니다."
-                )
-            for item in items:
-                vector = list(item.embedding)
-                if len(vector) != self._dimension:
-                    raise RuntimeError(
-                        "OpenAI 임베딩 차원이 설정과 다릅니다: "
-                        f"expected={self._dimension}, actual={len(vector)}"
-                    )
-                vectors.append(vector)
         return vectors
 
 
@@ -208,11 +167,17 @@ class MockEmbeddingProvider(EmbeddingProvider):
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         results = []
+
         for text in texts:
-            rng = np.random.default_rng(abs(hash(text)) % (2**31))
-            vec = rng.standard_normal(self._dimension).astype(np.float32)
-            vec /= np.linalg.norm(vec) + 1e-10
-            results.append(vec.tolist())
+            rng = np.random.default_rng(
+                abs(hash(text)) % (2**31)
+            )
+            vector = rng.standard_normal(
+                self._dimension
+            ).astype(np.float32)
+            vector /= np.linalg.norm(vector) + 1e-10
+            results.append(vector.tolist())
+
         return results
 
 
@@ -221,7 +186,9 @@ _provider: EmbeddingProvider | None = None
 
 def get_embedding_provider() -> EmbeddingProvider:
     """Return the singleton production provider; tests may replace it."""
+
     global _provider
+
     if _provider is None:
         from ...config import (
             EMBEDDING_BATCH_SIZE,
@@ -242,10 +209,14 @@ def get_embedding_provider() -> EmbeddingProvider:
             max_retries=OPENAI_MAX_RETRIES,
             batch_size=EMBEDDING_BATCH_SIZE,
         )
+
     return _provider
 
 
-def set_embedding_provider(provider: EmbeddingProvider | None) -> None:
+def set_embedding_provider(
+    provider: EmbeddingProvider | None,
+) -> None:
     """Replace or reset the singleton provider for tests."""
+
     global _provider
     _provider = provider
