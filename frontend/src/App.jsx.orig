@@ -78,20 +78,16 @@ function UserExperience({ session, setSession }) {
     }
   }, [setSession])
 
-  return (
-    <>
-      <div hidden={screen !== 'dashboard'}>
-        <Dashboard session={session} setSession={setSession} onShowRisk={() => setScreen('risk')} />
-      </div>
-      {screen === 'risk' && (
-        <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-[1400px]">
-            <RiskDashboard onBack={() => setScreen('dashboard')} />
-          </div>
-        </main>
-      )}
-    </>
-  )
+  if (screen === 'risk') {
+    return (
+      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1400px]">
+          <RiskDashboard onBack={() => setScreen('dashboard')} />
+        </div>
+      </main>
+    )
+  }
+  return <Dashboard session={session} setSession={setSession} onShowRisk={() => setScreen('risk')} />
 }
 
 function DemoStartScreen({ onStarted, initialError }) {
