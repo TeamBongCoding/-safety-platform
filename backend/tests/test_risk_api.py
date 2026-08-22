@@ -134,6 +134,7 @@ class TestRiskAPIAuth(unittest.TestCase):
 
         db = Session()
         self.user, self.site = _setup_user(db, "test@example.com", "password123")
+        self.site_id = self.site.id
         self.token = _make_session_cookie(db, self.user)
         db.close()
 
@@ -229,12 +230,135 @@ class TestRiskAPIAuth(unittest.TestCase):
         resp = self.client.get("/api/knowledge/documents")
         self.assertEqual(resp.status_code, 401)
 
+    def test_knowledge_chunk_requires_auth_and_site_access(self):
+        db = self.Session()
+        own_doc = KnowledgeDocument(
+            site_id=self.site_id,
+            title="내 현장 안전 문서",
+            source="test",
+            version="1.0",
+        )
+        db.add(own_doc)
+        db.flush()
+        own_chunk = DocumentChunk(
+            document_id=own_doc.id,
+            site_id=self.site_id,
+            chunk_index=0,
+            content="안전모를 올바르게 착용하세요.",
+            character_count=18,
+        )
+        db.add(own_chunk)
+
+        _, other_site = _setup_user(
+            db, "knowledge-other@example.com", "password123", "다른 현장"
+        )
+        other_doc = KnowledgeDocument(
+            site_id=other_site.id,
+            title="다른 현장 문서",
+            source="test",
+            version="1.0",
+        )
+        db.add(other_doc)
+        db.flush()
+        other_chunk = DocumentChunk(
+            document_id=other_doc.id,
+            site_id=other_site.id,
+            chunk_index=0,
+            content="다른 현장 전용 내용",
+            character_count=11,
+        )
+        db.add(other_chunk)
+        db.commit()
+        own_chunk_id = own_chunk.id
+        other_chunk_id = other_chunk.id
+        db.close()
+
+        unauth = self.client.get(f"/api/knowledge/chunks/{own_chunk_id}")
+        self.assertEqual(unauth.status_code, 401)
+
+        self.client.cookies.set("safety_session", self.token)
+        own = self.client.get(f"/api/knowledge/chunks/{own_chunk_id}")
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(own.json()["title"], "내 현장 안전 문서")
+        self.assertIn("안전모", own.json()["content"])
+
+        forbidden = self.client.get(f"/api/knowledge/chunks/{other_chunk_id}")
+        self.assertEqual(forbidden.status_code, 404)
+
+    def test_knowledge_upload_embedding_failure_cleans_storage(self):
+        storage = Mock()
+        storage.delete.return_value = True
+        self.client.cookies.set("safety_session", self.token)
+
+        with (
+            patch("app.services.storage.get_storage", return_value=storage),
+            patch(
+                "app.routers.knowledge.DocumentIndexer.index_document",
+                side_effect=EmbeddingGenerationError("임베딩 실패"),
+            ),
+        ):
+            resp = self.client.post(
+                "/api/knowledge/documents",
+                files={"file": ("safety.txt", b"safety content", "text/plain")},
+                data={"title": "안전 문서"},
+            )
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.json()["detail"], "임베딩 실패")
+        storage.upload.assert_called_once()
+        storage.delete.assert_called_once()
+
     def test_health_endpoint(self):
         resp = self.client.get("/health")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertIn("db", data)
+
+    def test_external_http_redirects_to_https(self):
+        resp = self.client.get(
+            "/health",
+            headers={
+                "host": "example.trycloudflare.com",
+                "x-forwarded-proto": "http",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 307)
+        self.assertEqual(resp.headers["location"], "https://example.trycloudflare.com/health")
+
+    def test_external_https_has_security_headers(self):
+        resp = self.client.get(
+            "/health",
+            headers={
+                "host": "example.trycloudflare.com",
+                "x-forwarded-proto": "https",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(resp.headers["x-frame-options"], "DENY")
+        self.assertIn("default-src 'self'", resp.headers["content-security-policy"])
+        self.assertIn("media-src 'self' blob:", resp.headers["content-security-policy"])
+        self.assertIn("max-age=31536000", resp.headers["strict-transport-security"])
+
+
+class TestRagQuery(unittest.TestCase):
+    def test_known_event_uses_korean_safety_terms(self):
+        query = rag_query_for_event("no_helmet")
+        self.assertIn("안전모 미착용", query)
+        self.assertNotIn("no_helmet", query)
+
+    def test_unknown_event_removes_internal_underscores(self):
+        query = rag_query_for_event("custom_hazard")
+        self.assertIn("custom hazard", query)
+        self.assertNotIn("custom_hazard", query)
+
+
+class TestRiskTimestampSerialization(unittest.TestCase):
+    def test_utc_stored_timestamp_is_converted_to_kst(self):
+        value = utc_stored_isoformat(datetime(2026, 8, 14, 1, 7, 50))
+        self.assertEqual(value, "2026-08-14T10:07:50+09:00")
 
 
 if __name__ == "__main__":

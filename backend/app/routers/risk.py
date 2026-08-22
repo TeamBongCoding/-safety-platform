@@ -101,6 +101,27 @@ def _select_rag_chunks(
         return [chunks[0]]
     return []
 
+_RAG_EVENT_LABELS = {
+    "no_helmet": "안전모 미착용",
+    "zone_intrusion": "위험구역 침입",
+    "fall_risk_entry": "추락위험 구역 진입",
+    "heavy_equipment_entry": "중장비 작업반경 진입",
+    "stagger": "휘청거림",
+    "sudden_sit": "주저앉음",
+    "fall": "쓰러짐",
+    "fall_still": "쓰러짐 후 장시간 정지",
+    "heat_stagger": "폭염 휘청거림",
+    "heat_sudden_sit": "폭염 주저앉음",
+    "heat_fall": "폭염 쓰러짐",
+    "heat_fall_still": "폭염 쓰러짐 후 장시간 정지",
+}
+
+
+def rag_query_for_event(event_type: str) -> str:
+    """내부 이벤트 코드를 안전 문서 검색에 적합한 한국어 질의로 바꾼다."""
+    label = _RAG_EVENT_LABELS.get(event_type, event_type.replace("_", " "))
+    return f"{label} 예방 대응 작업자 안전 수칙"
+
 
 @router.get("/config")
 def get_risk_config(site: Site = Depends(require_current_site)):
@@ -305,7 +326,7 @@ def generate_report(
     from ..services.llm_client import call_llm, fallback_report
     llm_report = call_llm(risk_result, retrieved)
     if llm_report is None:
-        llm_report = fallback_report(risk_result, horizon)
+        llm_report = fallback_report(risk_result, horizon, retrieved)
 
     llm_dict = llm_report.model_dump()
 

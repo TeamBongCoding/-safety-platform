@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { fetchRiskConfig, fetchRiskOverview, generateRiskReport, fetchLatestReport, fetchEpisodes, resolveEpisode, fetchDocuments, deleteDocument, uploadDocument } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchRiskConfig, fetchRiskOverview, generateRiskReport, fetchLatestReport, fetchEpisodes, resolveEpisode, fetchDocuments, fetchDocumentChunk, deleteDocument, uploadDocument } from './api'
+import { formatKoreanDateTime } from './time'
 
 const RISK_LEVEL_STYLE = {
   low:      { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', bar: 'bg-emerald-500', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
@@ -177,6 +178,9 @@ function ReportTab({ onError, riskConfig }) {
   const [eventType, setEventType] = useState('no_helmet')
   const [report, setReport] = useState(null)
   const [generating, setGenerating] = useState(false)
+  const [openSource, setOpenSource] = useState(null)
+  const [sourceLoading, setSourceLoading] = useState(false)
+  const sourceRequestRef = useRef(0)
 
   const loadLatest = useCallback(async () => {
     try {
@@ -205,6 +209,54 @@ function ReportTab({ onError, riskConfig }) {
   }
 
   const llm = report?.llm_report
+  const citations = Array.from(
+    new Map((llm?.citations || []).map((citation) => [citation.document_id, citation])).values(),
+  )
+  const citationNumberByDocument = new Map(
+    citations.map((citation, index) => [citation.document_id, index + 1]),
+  )
+  const citationByChunk = new Map(
+    (llm?.citations || []).map((citation) => [citation.chunk_id, citation]),
+  )
+
+  const closeSource = useCallback(() => {
+    sourceRequestRef.current += 1
+    setOpenSource(null)
+    setSourceLoading(false)
+  }, [])
+
+  const showSource = async (chunkId, title = '참고 문서') => {
+    if (chunkId == null) return
+    const requestId = sourceRequestRef.current + 1
+    sourceRequestRef.current = requestId
+    setSourceLoading(true)
+    setOpenSource({ title, section: null, content: '' })
+    try {
+      const source = await fetchDocumentChunk(chunkId)
+      if (sourceRequestRef.current === requestId) setOpenSource(source)
+    } catch (err) {
+      if (sourceRequestRef.current === requestId) {
+        setOpenSource({
+          title,
+          section: null,
+          content: `근거 문서를 불러오지 못했습니다: ${err.message}`,
+          error: true,
+        })
+        onError(err.message)
+      }
+    } finally {
+      if (sourceRequestRef.current === requestId) setSourceLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!openSource) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') closeSource()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [openSource, closeSource])
 
   return (
     <div className="space-y-5">
@@ -274,7 +326,11 @@ function ReportTab({ onError, riskConfig }) {
               {llm.recommendations?.length > 0 && (
                 <Section title="우선 조치 사항">
                   <ol className="space-y-2">
-                    {llm.recommendations.map((rec, i) => (
+                    {llm.recommendations.map((rec, i) => {
+                      const source = citationByChunk.get(rec.source_chunk_id)
+                      const citationNumber = source ? citationNumberByDocument.get(source.document_id) : null
+                      const reason = rec.reason?.replace(/\s*\(출처:\s*chunk_id=\d+\)\s*$/i, '')
+                      return (
                       <li key={i} className="flex gap-3 text-sm">
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-xs font-bold text-cyan-300">{rec.priority}</span>
                         <div>
@@ -288,17 +344,24 @@ function ReportTab({ onError, riskConfig }) {
                           )}
                         </div>
                       </li>
-                    ))}
+                      )
+                    })}
                   </ol>
                 </Section>
               )}
 
-              {llm.citations?.length > 0 && (
+              {citations.length > 0 && (
                 <Section title="참고 문서">
                   <ul className="space-y-1">
-                    {llm.citations.map((c, i) => (
+                    {citations.map((c, i) => (
                       <li key={i} className="text-xs text-slate-400">
-                        [{c.chunk_id}] {c.title}{c.section ? ` — ${c.section}` : ''}
+                        <button
+                          type="button"
+                          onClick={() => showSource(c.chunk_id, c.title)}
+                          className="text-left hover:text-cyan-300 hover:underline"
+                        >
+                          [{i + 1}] {c.title}{c.section ? ` — ${c.section}` : ''}
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -326,6 +389,33 @@ function ReportTab({ onError, riskConfig }) {
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center">
           <p className="text-slate-400">생성된 보고서가 없습니다.</p>
           <p className="mt-1 text-xs text-slate-600">위 버튼으로 보고서를 생성하세요.</p>
+        </div>
+      )}
+
+      {openSource && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeSource()
+          }}
+          role="presentation"
+        >
+          <div role="dialog" aria-modal="true" aria-label="참고 문서" className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/60">
+            <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900 px-4 py-3">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              <span className="ml-2 min-w-0 flex-1 truncate font-mono text-xs text-slate-400">reference://{openSource.title}</span>
+              <button type="button" onClick={closeSource} className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-800 hover:text-white">닫기</button>
+            </div>
+            <div className="max-h-[65vh] overflow-y-auto p-5 font-mono">
+              <p className="text-sm font-semibold text-cyan-300">$ {openSource.title}</p>
+              {openSource.section && <p className="mt-1 text-xs text-slate-500"># {openSource.section}</p>}
+              <div className={`mt-4 whitespace-pre-wrap text-sm leading-7 ${openSource.error ? 'text-red-300' : 'text-slate-300'}`}>
+                {sourceLoading ? '근거 내용을 불러오는 중...' : openSource.content}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

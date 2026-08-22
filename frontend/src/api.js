@@ -160,6 +160,10 @@ export function fetchDocuments() {
   return api('/api/knowledge/documents')
 }
 
+export function fetchDocumentChunk(id) {
+  return api(`/api/knowledge/chunks/${id}`)
+}
+
 export function deleteDocument(id) {
   return api(`/api/knowledge/documents/${id}`, { method: 'DELETE' })
 }
@@ -168,6 +172,5 @@ export function uploadDocument(formData) {
   return api('/api/knowledge/documents', {
     method: 'POST',
     body: formData,
-    headers: {},  // multipart; no Content-Type override
   })
 }

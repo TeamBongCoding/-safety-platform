@@ -81,6 +81,10 @@ class TestFallbackReport(unittest.TestCase):
         report = fallback_report(_RISK, horizon="7d")
         self.assertIsInstance(report.evidence, list)
 
+    def test_fallback_always_has_five_recommendations(self):
+        report = fallback_report(_RISK, horizon="7d")
+        self.assertEqual(len(report.recommendations), 5)
+
 
 class TestCallLLMDisabled(unittest.TestCase):
     def test_disabled_returns_none(self):
@@ -110,11 +114,12 @@ class TestCallLLMSuccess(unittest.TestCase):
             ],
             "recommendations": [
                 {
-                    "priority": 1,
-                    "action": "안전모 착용 강화",
+                    "priority": priority,
+                    "action": f"안전모 착용 강화 {priority}",
                     "reason": "위험 증가",
                     "source_chunk_id": 1,
                 }
+                for priority in range(1, 6)
             ],
             "citations": citations or [],
             "limitations": [],
@@ -212,6 +217,18 @@ class TestCallLLMSuccess(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(len(result.citations), 1)
         self.assertEqual(result.citations[0].chunk_id, 1)
+
+    def test_missing_citation_is_restored_from_recommendation_source(self):
+        report = self._make_report(citations=[])
+        client = self._make_client(report)
+        cfg = LLMConfig(enabled=True, api_key="test-key", timeout_sec=5)
+        with patch("app.services.llm_client.OpenAI", return_value=client):
+            result = call_llm(_RISK, _CHUNKS, config=cfg)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.citations), 1)
+        self.assertEqual(result.citations[0].chunk_id, 1)
+        self.assertEqual(result.citations[0].title, "안전 매뉴얼")
 
     def test_custom_base_url_is_forwarded_to_sdk(self):
         client = self._make_client(self._make_report())

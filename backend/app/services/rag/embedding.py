@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
+from openai import OpenAI
 
 
 class EmbeddingProvider(ABC):
@@ -113,6 +114,81 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                     f"OpenAI 임베딩 차원이 설정값 {self._dimension}과 다릅니다."
                 )
             vectors.extend(batch_vectors)
+        return vectors
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """OpenAI Embeddings API를 사용하여 로컬 모델 메모리를 사용하지 않는다."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://api.openai.com/v1",
+        model_name: str = "text-embedding-3-small",
+        dimension: int = 1024,
+        timeout_sec: float = 60.0,
+        max_retries: int = 1,
+        batch_size: int = 64,
+    ):
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._model_name = model_name
+        self._dimension = dimension
+        self._timeout_sec = timeout_sec
+        self._max_retries = max_retries
+        self._batch_size = max(1, batch_size)
+        self._client: Any | None = None
+
+    @property
+    def model_name(self) -> str:
+        # 동일 모델이라도 차원이 다른 벡터는 검색에서 섞으면 안 된다.
+        return f"openai:{self._model_name}:{self._dimension}"
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def _get_client(self) -> OpenAI:
+        if not self._api_key:
+            raise RuntimeError(
+                "OpenAI 임베딩을 사용하려면 OPENAI_API_KEY가 필요합니다."
+            )
+        if self._client is None:
+            self._client = OpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                timeout=self._timeout_sec,
+                max_retries=self._max_retries,
+            )
+        return self._client
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        client = self._get_client()
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self._batch_size):
+            batch = texts[start : start + self._batch_size]
+            response = client.embeddings.create(
+                model=self._model_name,
+                input=batch,
+                dimensions=self._dimension,
+                encoding_format="float",
+            )
+            items = sorted(response.data, key=lambda item: item.index)
+            if len(items) != len(batch):
+                raise RuntimeError(
+                    "OpenAI 임베딩 응답 개수가 입력 개수와 다릅니다."
+                )
+            for item in items:
+                vector = list(item.embedding)
+                if len(vector) != self._dimension:
+                    raise RuntimeError(
+                        "OpenAI 임베딩 차원이 설정과 다릅니다: "
+                        f"expected={self._dimension}, actual={len(vector)}"
+                    )
+                vectors.append(vector)
         return vectors
 
 

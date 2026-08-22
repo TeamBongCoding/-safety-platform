@@ -13,8 +13,12 @@ from sqlalchemy.orm import Session
 from ..auth import require_current_site
 from ..database import SessionLocal, get_db
 from ..models import DocumentChunk, KnowledgeDocument, Site
-from ..schemas import DocumentOut
-from ..services.rag.indexer import DocumentIndexer, allowed_extension
+from ..schemas import DocumentChunkOut, DocumentOut
+from ..services.rag.indexer import (
+    DocumentIndexer,
+    EmbeddingGenerationError,
+    allowed_extension,
+)
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 logger = logging.getLogger(__name__)
@@ -61,8 +65,24 @@ async def upload_document(
             filename=file.filename or "upload.txt",
             storage_object_key=storage_key,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    except (ValueError, EmbeddingGenerationError) as exc:
+        # 인덱싱이 실패했으면 먼저 업로드된 원본도 정리해 고아 파일을 남기지 않는다.
+        if storage_key:
+            try:
+                from ..services.storage import get_storage
+                from ..config import SUPABASE_DOCUMENT_BUCKET
+                if not get_storage().delete(SUPABASE_DOCUMENT_BUCKET, storage_key):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "인덱싱 실패 후 Storage 파일 정리 실패: %s", storage_key
+                    )
+            except Exception as cleanup_exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "인덱싱 실패 후 Storage 정리 중 오류: %s", cleanup_exc
+                )
+        status_code = 503 if isinstance(exc, EmbeddingGenerationError) else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
     try:
         from ..config import SUPABASE_DOCUMENT_BUCKET
@@ -120,6 +140,36 @@ def list_documents(
         )
         for doc in docs
     ]
+
+
+@router.get("/chunks/{chunk_id}", response_model=DocumentChunkOut)
+def get_document_chunk(
+    chunk_id: int,
+    site: Site = Depends(require_current_site),
+    db: Session = Depends(get_db),
+):
+    row = db.execute(
+        select(DocumentChunk, KnowledgeDocument.title)
+        .join(
+            KnowledgeDocument,
+            KnowledgeDocument.id == DocumentChunk.document_id,
+        )
+        .where(
+            DocumentChunk.id == chunk_id,
+            KnowledgeDocument.site_id == site.id,
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="근거 문서를 찾을 수 없습니다.")
+
+    chunk, title = row
+    return DocumentChunkOut(
+        id=chunk.id,
+        document_id=chunk.document_id,
+        title=title,
+        section=chunk.section,
+        content=chunk.content,
+    )
 
 
 @router.delete("/documents/{document_id}", status_code=204)

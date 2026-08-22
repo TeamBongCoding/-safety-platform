@@ -15,6 +15,16 @@ from app.services.rag.indexer import DocumentIndexer, chunk_text
 from app.services.rag.retriever import KnowledgeRetriever
 
 
+class _NamedMockEmbeddingProvider(MockEmbeddingProvider):
+    def __init__(self, name: str, dimension: int = 4):
+        super().__init__(dimension=dimension)
+        self._name = name
+
+    @property
+    def model_name(self) -> str:
+        return self._name
+
+
 def _make_db():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -144,6 +154,18 @@ class TestDocumentIndexer(unittest.TestCase):
         doc_id2 = self.indexer.index_document(1, "가이드", "test", "1.0", content2, "guide.txt")
         self.assertEqual(doc_id1, doc_id2)
 
+    def test_embedding_failure_does_not_save_document(self):
+        with self.assertLogs("app.services.rag.indexer", level="ERROR"):
+            with patch.object(self.provider, "encode", side_effect=RuntimeError("model failed")):
+                with self.assertRaises(EmbeddingGenerationError):
+                    self.indexer.index_document(
+                        1, "실패 문서", "test", "1.0", b"content", "failed.txt"
+                    )
+
+        with self.session_factory() as db:
+            self.assertEqual(db.query(KnowledgeDocument).count(), 0)
+            self.assertEqual(db.query(DocumentChunk).count(), 0)
+
     def test_delete_document(self):
         doc_id = self.indexer.index_document(1, "삭제용", "test", "1.0", b"content", "del.txt")
         result = self.indexer.delete_document(site_id=1, document_id=doc_id)
@@ -205,6 +227,34 @@ class TestKnowledgeRetrieverFallback(unittest.TestCase):
         results = retriever.search("안전모 착용", site_id=1)
         self.assertGreater(len(results), 0)
         self.assertIn("chunk_id", dir(results[0]))
+
+    def test_search_automatically_excludes_vectors_from_other_models(self):
+        self.indexer.index_document(
+            1, "현재 모델 문서", "test", "1.0",
+            "안전모 착용은 필수입니다.".encode("utf-8"),
+            "current.txt",
+        )
+        other_provider = _NamedMockEmbeddingProvider("other-model")
+        other_indexer = DocumentIndexer(
+            session_factory=self.session_factory,
+            embedding_provider=other_provider,
+            chunk_size=200,
+        )
+        other_indexer.index_document(
+            1, "이전 모델 문서", "test", "1.0",
+            "오래된 임베딩입니다.".encode("utf-8"),
+            "old.txt",
+        )
+
+        retriever = KnowledgeRetriever(
+            session_factory=self.session_factory,
+            embedding_provider=self.provider,
+            threshold=-1.0,
+        )
+        results = retriever.search("안전모 착용", site_id=1)
+
+        self.assertGreater(len(results), 0)
+        self.assertTrue(all(result.embedding_model == "mock" for result in results))
 
     def test_citation_contains_correct_fields(self):
         self.indexer.index_document(
