@@ -37,6 +37,7 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from ..time_utils import utc_now
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -159,7 +160,7 @@ class RuleBasedRiskEngine(RiskModel):
     ) -> list[RiskResult]:
         from ..models import EventEpisode
 
-        now = datetime.now()
+        now = utc_now()
         results: list[RiskResult] = []
 
         # Discover event types if not specified
@@ -348,7 +349,7 @@ class RuleBasedRiskEngine(RiskModel):
             confidence_level=confidence_level,
             factors=factors,
             limitations=limitations,
-            generated_at=datetime.now(),
+            generated_at=utc_now(),
             site_id=site_id,
             zone_id=zone_id,
             model_version=self._model_version,
@@ -356,7 +357,7 @@ class RuleBasedRiskEngine(RiskModel):
 
     def _get_worker_hours(self, db: Session, site_id: int | None, days: int) -> float:
         from ..models import ExposureHourly
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = utc_now() - timedelta(days=days)
         total_sec = db.scalar(
             select(func.sum(ExposureHourly.worker_seconds)).where(
                 ExposureHourly.site_id == site_id,

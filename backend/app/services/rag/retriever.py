@@ -60,17 +60,18 @@ class KnowledgeRetriever:
 
         provider = self._provider()
         query_vec = provider.encode_one(query)
-        # 다른 모델의 벡터는 차원이 같아도 서로 비교할 수 없다.
-        # 명시적 필터가 없으면 현재 provider로 인덱싱한 청크만 검색한다.
-        model_filter = embedding_model_filter or provider.model_name
 
-        # 설정 문자열이 아니라 이 retriever가 실제로 사용하는 세션의
-        # dialect를 확인한다. 테스트/도구에서 별도 SQLite 세션을 주입할 수 있다.
+        # 운영 설정 문자열이 아니라 실제 주입된 세션의 dialect를 사용한다.
+        # 운영 SessionLocal은 Supabase PostgreSQL/pgvector로, 단위 테스트의
+        # 인메모리 세션은 SQLite/Python cosine fallback으로 정확히 분기된다.
         with self._session_factory() as db:
-            dialect_name = db.get_bind().dialect.name
-        if dialect_name == "sqlite":
-            return self._search_sqlite(query_vec, site_id, k, thr, model_filter)
-        return self._search_pgvector(query_vec, site_id, k, thr, model_filter)
+            dialect = db.get_bind().dialect.name
+
+        if dialect == "sqlite":
+            return self._search_sqlite(query_vec, site_id, k, thr, embedding_model_filter)
+        if dialect == "postgresql":
+            return self._search_pgvector(query_vec, site_id, k, thr, embedding_model_filter)
+        raise RuntimeError(f"지원하지 않는 RAG 데이터베이스입니다: {dialect}")
 
     # ── PostgreSQL / pgvector ─────────────────────────────────────────────────
 
@@ -82,15 +83,15 @@ class KnowledgeRetriever:
 
         vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
 
-        filters = ["dc.embedding IS NOT NULL"]
+        where_clauses = ["dc.embedding IS NOT NULL"]
         params = {"vec": vec_str, "k": top_k}
         if site_id is not None:
-            filters.append("dc.site_id = :site_id")
+            where_clauses.append("dc.site_id = :site_id")
             params["site_id"] = site_id
         if model_filter:
-            filters.append("dc.embedding_model = :model")
+            where_clauses.append("dc.embedding_model = :model")
             params["model"] = model_filter
-        where_sql = "\n              AND ".join(filters)
+        where_sql = "\n              AND ".join(where_clauses)
 
         sql = f"""
             SELECT

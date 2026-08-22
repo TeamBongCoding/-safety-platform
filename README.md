@@ -1,70 +1,8 @@
-# AI 현장 안전관리 플랫폼
+# AI 안전관리 플랫폼
 
-> 브라우저 카메라 또는 테스트 영상을 실시간 분석해 작업자를 추적하고, 안전모·위험구역·이상행동·폭염 위험을 하나의 관제 화면에서 관리하는 FastAPI + React 기반 안전 운영 플랫폼입니다.
+두 대의 USB 카메라와 BLE iBeacon 태그를 함께 사용해 작업자를 추적하고, 안전모 미착용·위험구역 접근·낙상 징후·폭염 노출을 분석하는 웹 데모입니다. 분석 기록을 기반으로 위험 추세를 계산하며, 업로드한 안전 문서를 OpenAI 임베딩으로 검색해 AI 보고서에 반영합니다.
 
-이 프로젝트의 핵심은 단순 객체 검출이 아니라 **사람·장소·시간의 맥락을 함께 판단하는 것**입니다. 예를 들어 일반구역의 안전모 미착용은 사건으로 저장하지 않지만, 작업구역 안에서 같은 상황이 발생하면 작업자별 위험 사건으로 기록합니다. 연속 프레임의 같은 위험은 한 개의 사건 에피소드로 묶고, 누적 데이터는 위험 추세와 근거 문서가 포함된 AI 보고서로 연결됩니다.
-
-## 한눈에 보기
-
-| 영역 | 제공 기능 |
-|---|---|
-| 영상 입력 | 브라우저 카메라 또는 로컬 테스트 영상, 현장별 활성 입력 1개 |
-| AI 분석 | 사람·안전모 검출, 포즈 기반 행동 분류, 외형 특징을 활용한 카메라 내 추적 |
-| 안전 규칙 | 작업구역 안전모 미착용, 출입금지·추락위험·중장비 구역 접근/진입 |
-| 폭염 안전 | 기상청 API 기반 체감온도, 폭염 맥락 행동 이벤트, 노출 시간·휴식 권고 |
-| 관제 | 실시간 오버레이, 작업자 카드, 이벤트 로그, 사건 해결 처리 |
-| 위험 분석 | 단기/장기 추세, 결정론적 위험 점수, 사건 목록, AI 위험 보고서 |
-| 지식 검색 | 안전 문서 업로드, 임베딩 검색, 보고서 인용 원문 확인 |
-| 운영 | 다중 현장, 회사·현장·구역 안전 순위, 플랫폼 관리자 화면 |
-| 배포 | JupyterHub 팀 컨테이너, FastAPI 단일 origin, Cloudflare Tunnel HTTPS |
-
-## 판단 흐름
-
-```mermaid
-flowchart LR
-    A[브라우저 카메라<br/>또는 테스트 영상] --> B[사람·안전모·포즈 검출]
-    B --> C[카메라 내<br/>작업자 추적]
-    C --> D[구역·행동<br/>안전 규칙]
-    K[기상청 체감온도] --> D
-    D --> E[실시간 관제와<br/>작업자 상태]
-    D --> F[사건 에피소드와<br/>PostgreSQL/SQLite]
-    F --> G[위험 추세 엔진]
-    H[현장 안전 문서<br/>RAG 검색] --> I[AI 위험 보고서]
-    G --> I
-    I --> J[권고사항과<br/>인용 원문]
-```
-
-### 맥락 기반 사건 정책
-
-| 상황 | 화면 판정 | 사건 저장 |
-|---|---|---|
-| 일반구역에서 안전모 미착용 | 상태는 표시 가능 | 저장하지 않음 |
-| 작업구역 안에서 안전모 미착용 | 경고 | `no_helmet` |
-| 출입금지구역 경계 근처 | 접근 경고 | `zone_approach` |
-| 출입금지구역 내부 진입 | 위험 알림 | `zone_intrusion` |
-| 주저앉음·쓰러짐·장시간 정지 | 행동 상태 표시 | `sudden_sit`, `fall`, `fall_still` |
-| 폭염 맥락에서 같은 이상행동 | 폭염 위험으로 구분 | `heat_*` 이벤트 |
-
-같은 작업자가 같은 위험을 여러 프레임 동안 연속 발생시켜도 평가와 위험 추세에서는 프레임 수가 아니라 **사람별 사건 에피소드 1건**으로 취급합니다.
-
-## 기술 스택
-
-| 계층 | 기술 |
-|---|---|
-| Frontend | React 19, Vite 8, Tailwind CSS 4, Recharts |
-| API / 실시간 | FastAPI, Uvicorn, WebSocket |
-| 비전 | Ultralytics YOLO, OpenCV, PyTorch, TorchVision |
-| 추적 | 카메라 내 로컬 추적, HSV/Lab 외형 특징 |
-| 공간 판정 | Shapely, 정규화 폴리곤 ROI |
-| 데이터 | SQLAlchemy, SQLite 또는 PostgreSQL/Supabase, pgvector |
-| AI 보고서 | OpenAI Python SDK, 구조화 출력, 결정론적 fallback 보고서 |
-| RAG | OpenAI Embeddings 또는 로컬 `BAAI/bge-m3`, 문서 chunk 검색, PDF/TXT/MD |
-| 외부 데이터 | 기상청 단기예보 API |
-| 배포 | JupyterHub, Cloudflare Tunnel, 동일 origin 정적 배포 |
-
-## 빠른 시작
-
-### 요구 사항
+현재 버전은 별도 회원가입이나 관리자 화면이 없는 익명 데모 방식입니다. 방문자가 **클라이언트 데모 시작**을 선택하면 격리된 임시 계정과 현장이 만들어지고, 사용자가 데모를 종료하거나 세션이 만료되면 해당 계정의 DB 기록과 저장소 파일을 함께 삭제합니다.
 
 - Python 3.11 이상
 - Node.js 20 이상과 npm
@@ -72,414 +10,353 @@ flowchart LR
 - AI 분석을 사용할 경우 사람·안전모·포즈 모델 파일
 - 선택 사항: PostgreSQL/Supabase, OpenAI API 키, 기상청 API 키
 
-### Linux / macOS 개발 환경
+- USB 카메라 2대 또는 녹화 영상 2개 동시 분석
+- YOLO 기반 사람·안전모 검출
+- BoT-SORT + FastReID 외형 특징 갤러리를 이용한 장기 ID 유지
+- 평상시 2프레임 간격, 근접·교차·프레임 공백 시 매 프레임 적응형 추론
+- 카메라 구도가 겹치거나 분리되어 있어도 카메라 간 전역 ID 학습
+- Arduino Uno + HM-10 수신기 2대의 RSSI를 이용한 카메라 근접도 보정
+- iBeacon 태그와 작업자 ID 연결 및 중복 ID 수동 병합
+- 출입금지·추락위험·중장비·작업구역 폴리곤 설정
+- 안전모 미착용, 위험구역 침입, 낙상·주저앉음·비틀거림 이벤트 분석
+- 사건 단위 episode 집계와 위험 추세 보고서
+- TXT, Markdown, PDF 지식문서 업로드 및 OpenAI Embeddings API 기반 RAG
+- SQLite 기본 저장, PostgreSQL/Supabase 및 Supabase Storage 선택 지원
+- DB는 UTC로 저장하고 화면/API에는 한국시간(KST)으로 표시
+
+## 시스템 구성
+
+```text
+Chrome / Edge
+├─ USB 카메라 A/B ─ WebSocket JPEG 업로드 ─┐
+├─ Arduino BLE 수신기 A/B ─ Web Serial ───┤
+└─ React 분석·설정 화면                    │
+                                           ▼
+FastAPI
+├─ YOLO 사람/안전모/포즈 검출
+├─ BoT-SORT + FastReID 단일 카메라 추적
+├─ 카메라 간 전역 ID + BLE RSSI 보정
+├─ 위험구역·행동·폭염 규칙
+├─ Risk Engine + OpenAI RAG 보고서
+└─ SQLite 또는 Supabase PostgreSQL/Storage
+```
+
+프로덕션 빌드에서는 FastAPI가 `frontend/dist`를 함께 제공하므로 화면, API, 쿠키, WebSocket이 같은 origin을 사용합니다.
+
+## 필요 환경
+
+- Python 3.11 이상
+- Node.js 20 이상과 npm
+- Git
+- CUDA GPU 권장
+  - 현재 requirements는 PyTorch CUDA 12.1 빌드를 사용합니다.
+  - `REID_DEVICE=auto`이면 CUDA가 있을 때 FastReID가 GPU를 선택합니다.
+- 카메라·BLE 사용 시 데스크톱 Chrome 또는 Edge
+- 외부 장치 연결 시 HTTPS 또는 localhost
+
+선택 하드웨어:
+
+- USB 웹캠 1~2대
+- Arduino Uno 1~2대
+- HM-10 BLE 4.0 모듈 1~2대
+- iBeacon 송신기 또는 iBeacon 앱을 실행하는 스마트폰 1~2대
+
+## 빠른 시작
+
+### Linux / Jupyter 환경
 
 ```bash
 git clone <REPOSITORY_URL> safety-platform
 cd safety-platform
 
 cp .env.example .env
-chmod 600 .env
-
 python3 -m venv backend/.venv
 backend/.venv/bin/python -m pip install --upgrade pip
 backend/.venv/bin/python -m pip install -r backend/requirements.txt
 
 cd frontend
 npm ci
+npm run build
 cd ..
 
-./start.sh
+bash start.sh
 ```
 
-AI 분석까지 시작하려면 모델 경로를 확인한 뒤 다음 명령을 사용합니다.
+접속 주소:
 
-```bash
-./start.sh --with-analyzer
-```
-
-기본 접속 주소는 다음과 같습니다.
-
-- 개발 화면: `http://localhost:5173`
+- Vite 개발 화면: `http://localhost:5173`
+- FastAPI가 제공하는 빌드 화면: `http://localhost:8000`
 - API 문서: `http://localhost:8000/docs`
 - 상태 확인: `http://localhost:8000/health`
 
-`Ctrl+C`를 누르면 개발용 백엔드와 프런트엔드가 함께 종료됩니다.
+`start.sh`는 백엔드와 Vite 개발 서버를 함께 실행하고 `Ctrl+C`로 종료합니다.
 
 ### Windows PowerShell
 
 ```powershell
-git clone <REPOSITORY_URL> safety-platform
-cd safety-platform
 Copy-Item .env.example .env
-
 py -3.11 -m venv backend\.venv
 backend\.venv\Scripts\python -m pip install --upgrade pip
 backend\.venv\Scripts\python -m pip install -r backend\requirements.txt
 
-cd frontend
-npm install
-cd ..
+Set-Location frontend
+npm ci
+npm run build
+Set-Location ..
 
 .\start.ps1
 ```
 
-AI 분석 포함 실행은 다음과 같습니다.
-
-```powershell
-.\start.ps1 -WithAnalyzer
-```
-
 ## 모델 준비
 
-기본 모델 경로는 백엔드 실행 디렉터리인 `backend/`를 기준으로 해석됩니다.
-
-| 용도 | 기본 경로 | 필수 여부 |
-|---|---|---|
-| 안전모 검출 | `backend/weights/best.pt` | 안전모 기능에 필요 |
-| 사람 검출 | `backend/yolov8n.pt` | 사람 분석에 필요 |
-| 포즈 분석 | `backend/weights/yolo11n-pose.pt` | `POSE_ENABLED=1`일 때 필요 |
-
-모델과 가중치는 대용량 파일이므로 Git에서 제외됩니다. 팀이 학습하거나 승인받은 파일을 각 경로에 별도로 배치하세요.
-
-## 처음 사용하는 순서
-
-1. 첫 화면에서 회사명·담당자명·첫 현장명을 입력해 계정을 만듭니다.
-2. 현장 설정에서 실내/실외와 위치 정보를 확인합니다. 실외 현장은 기상청 체감온도 계산에 좌표를 사용합니다.
-3. 브라우저 카메라나 테스트 영상 중 하나를 활성 입력으로 연결합니다.
-4. 구역 편집기에서 작업구역, 출입금지, 추락위험 또는 중장비 작업반경을 그립니다.
-5. 관제 화면에서 작업자 ID, 안전모, 행동, 폭염 노출과 이벤트 로그를 확인합니다.
-6. 위험 추세 분석에서 사건 에피소드와 단기/장기 위험도를 확인합니다.
-7. 안전 문서를 등록한 뒤 AI 보고서를 생성하고, 인용 번호를 눌러 실제 근거 원문을 확인합니다.
-
-## 핵심 환경변수
-
-루트 `.env`는 애플리케이션과 배포 스크립트가 함께 읽습니다. 실제 키와 비밀번호는 이 파일에만 저장하고 Git에 커밋하지 마세요.
-
-| 변수 | 설명 | 기본/권장 값 |
-|---|---|---|
-| `ANALYSIS_ENABLED` | 서버 시작 시 파일 기반 분석 사용 | 개발 `0`, 분석 시 `1` |
-| `VIDEO_SOURCE` | 기본 테스트 영상 | `data/videos/site1.mp4` |
-| `POSE_ENABLED` | 포즈 기반 행동 감지 | 모델 준비 후 `1` |
-| `DATABASE_URL` | SQLite 또는 PostgreSQL 연결 문자열 | `sqlite:///./safety.db` |
-| `COOKIE_SECURE` | HTTPS 전용 로그인 쿠키 | 로컬 HTTP `0`, 외부 HTTPS `1` |
-| `KMA_API_KEY` | 기상청 API 인증키 | 실외 체감온도 사용 시 설정 |
-| `OPENAI_ENABLED` | OpenAI 보고서 및 `auto` 외부 임베딩 활성화 | 키 설정 후 `1` |
-| `OPENAI_API_KEY` | OpenAI 또는 호환 gateway 키 | `.env`에만 저장 |
-| `OPENAI_MODEL` | 보고서 생성 모델 | `gpt-4o-mini` |
-| `OPENAI_BASE_URL` | 별도 호환 gateway 주소 | 없으면 공식 OpenAI API |
-| `EMBEDDING_PROVIDER` | RAG 임베딩 제공자 | `auto`: OpenAI 활성 시 외부, 아니면 로컬 |
-| `EMBEDDING_MODEL_NAME` | 로컬 RAG 임베딩 모델 | `BAAI/bge-m3` |
-| `OPENAI_EMBEDDING_MODEL` | 외부 RAG 임베딩 모델 | `text-embedding-3-small` |
-| `EMBEDDING_DIM` | 저장하는 임베딩 차원 | `1024` |
-| `RAG_TOP_K` / `RAG_THRESHOLD` | 검색 개수와 최소 유사도 | `5` / `0.7` |
-| `RISK_WINDOW_MODE` | 위험 추세 시간축 | 데모 `demo`, 운영 `production` |
-| `CLOUDFLARE_TUNNEL_TOKEN` | 고정 named tunnel 토큰 | Quick Tunnel은 비워 둠 |
-| `PUBLIC_URL` | named tunnel 공개 주소 | named tunnel 사용 시 설정 |
-
-`EMBEDDING_PROVIDER=auto`는 `OPENAI_ENABLED=1`일 때 기존 `OPENAI_API_KEY`를
-재사용하므로 별도 키 설정이 필요하지 않습니다. 임베딩 제공자나 모델을 바꾸면 기존
-벡터와 혼용할 수 없으므로 저장된 안전 문서를 새 모델로 다시 인덱싱해야 합니다.
-
-기상청에서 받은 인코딩 인증키에 `%`가 포함되어 있어도 `.env`에서는 별도 이스케이프 없이 발급값 그대로 입력합니다. 반면 `DATABASE_URL`의 비밀번호에 `@`, `/`, `#`, `%` 같은 예약 문자가 있으면 URL 인코딩된 연결 문자열을 사용하는 것이 안전합니다.
-
-권장 파일 권한은 다음과 같습니다.
-
-```bash
-chmod 600 .env
-```
-
-### 위험 추세 시간축
-
-데모 모드는 실제 사건의 최근 1분과 5분을 비교해 5초마다 갱신합니다. 기존 API 호환성을 위해 요청 파라미터는 `24h`, `7d`를 유지하지만 화면 라벨과 내부 계산 구간을 데모 시간축으로 매핑합니다.
-
-```dotenv
-RISK_WINDOW_MODE=demo
-RISK_REFRESH_SECONDS=5
-RISK_SHORT_WINDOW_MINUTES=1
-RISK_LONG_WINDOW_MINUTES=5
-```
-
-실운영 시간축은 다음과 같습니다.
-
-```dotenv
-RISK_WINDOW_MODE=production
-```
-
-AI 보고서는 사용자가 생성 버튼을 눌렀을 때만 OpenAI를 호출합니다. OpenAI가 비활성화됐거나 호출에 실패해도 결정론적 Risk Engine 결과를 사용한 fallback 보고서가 반환됩니다.
-
-## JupyterHub + Cloudflare 배포
-
-학교 JupyterHub 팀 컨테이너에서는 FastAPI가 React production build까지 `127.0.0.1:8000`에서 제공합니다. `cloudflared`가 컨테이너에서 Cloudflare 엣지로 연결하므로 호스트 inbound 포트를 열지 않고 외부 HTTPS 주소를 만들 수 있습니다.
+다음 경로에 모델 파일을 준비합니다.
 
 ```text
-심사자 브라우저
-    │ HTTPS
-    ▼
-Cloudflare 글로벌 엣지
-    ▲ outbound QUIC 또는 HTTP/2 over TCP 443
-    │
-팀 컨테이너: cloudflared → 127.0.0.1:8000 → FastAPI + React
+backend/weights/
+├─ best.pt                 # 안전모/머리 검출 모델
+├─ market_bot_R50.pth      # FastReID Market1501 BoT R50
+└─ yolo11n-pose.pt         # 포즈 기반 행동 분석 모델
 ```
 
-최초 설치와 시작:
+FastReID 가중치는 스크립트로 받을 수 있습니다.
+
+```bash
+cd backend
+.venv/bin/python -m scripts.download_fastreid_weights
+cd ..
+```
+
+`*.pt`, `*.pth`, `.env`, DB, 빌드 결과는 Git에서 제외됩니다. 모델과 비밀키를 커밋하지 마세요.
+
+## 환경 설정
+
+루트의 `.env.example`을 `.env`로 복사해 사용합니다. 변경한 환경변수는 백엔드 재시작 후 적용됩니다.
+
+### 데모 세션
+
+| 변수 | 기본값 | 설명 |
+|---|---:|---|
+| `DEMO_IDLE_MINUTES` | `30` | 활동이 없는 데모 세션 만료 기준 |
+| `DEMO_MAX_HOURS` | `2` | 데모 계정 최대 수명 |
+| `DEMO_CLEANUP_INTERVAL_SECONDS` | `60` | 만료 계정 정리 주기 |
+| `DEMO_MAX_ACTIVE_SESSIONS` | `5` | 동시 활성 데모 사용자 수 |
+| `COOKIE_SECURE` | `0` | 로컬 HTTP는 `0`, HTTPS 배포는 `1` |
+
+각 데모 사용자는 별도 계정과 현장을 사용합니다. 데모 종료 또는 만료 시 다음 데이터가 정리됩니다.
+
+- 사용자, 세션, 현장, 위험구역
+- 이벤트와 사건 episode
+- 위험 예측·AI 보고서
+- 지식문서와 임베딩 청크
+- Supabase 또는 로컬 저장소의 문서·스냅샷·클립
+
+저장소 파일 삭제에 실패하면 계정을 먼저 차단하고 다음 정리 주기에 다시 시도합니다.
+
+### 영상 분석과 ReID
+
+| 변수 | 기본값 | 설명 |
+|---|---:|---|
+| `MODEL_CONFIDENCE` | `0.4` | YOLO 검출 신뢰도 |
+| `MODEL_IMAGE_SIZE` | `384` | YOLO 입력 크기 |
+| `LIVE_INFER_EVERY` | `2` | 평상시 검출 간격; 근접·교차 시 자동으로 매 프레임 처리 |
+| `TRACK_BUFFER_FRAMES` | `90` | BoT-SORT 트랙 유지 버퍼 |
+| `REID_MATCH_THRESHOLD` | `0.72` | 장기 ReID 외형 매칭 기준 |
+| `REID_GALLERY_SECONDS` | `120` | 일반 외형 특징 보존 시간 |
+| `REID_SWITCH_MARGIN` | `0.10` | ID 변경에 필요한 특징 점수 차이 |
+| `REID_SWITCH_CONFIRM_FRAMES` | `3` | 애매한 ID 변경을 확인할 깨끗한 프레임 수 |
+| `REID_FRAME_GAP_SECONDS` | `0.45` | 이 간격 이상이면 위치보다 외형을 우선하는 기준 |
+| `REID_DEVICE` | `auto` | `auto`, `cpu`, `cuda`, `cuda:0` 등 |
+
+추적 정책은 다음과 같습니다.
+
+- 평상시 매칭은 외형 특징 65%, 움직임 25% 중심입니다.
+- 사람이 가까워지거나 겹치고, 입력 공백이 생기면 외형 비중을 약 86%로 높입니다.
+- 겹치는 동안에는 잘못 잘린 특징과 이동 이력을 학습하지 않습니다.
+- 특징 차이가 애매하면 기존 ID를 유지하고, 깨끗한 프레임에서 연속 확인한 뒤 변경합니다.
+- 활성 BLE 태그와 연결된 ID는 일반 ReID 갤러리 시간이 지나도 복원 후보로 유지합니다.
+
+## 사용 순서
+
+1. 첫 화면에서 **클라이언트 데모 시작**을 선택합니다.
+2. 기본으로 생성된 데모 현장을 사용하거나 새 현장을 추가합니다.
+3. 분석 화면에서 카메라 A/B를 검색해 서로 다른 USB 장치를 선택합니다.
+4. 카메라를 시작하거나 녹화 영상을 업로드합니다.
+5. 필요한 경우 출입금지·추락위험·중장비·작업구역을 그립니다.
+6. BLE를 사용한다면 수신기 A/B를 연결하고 태그를 작업자 ID에 등록합니다.
+7. 이벤트와 위험 추세를 확인하고 필요하면 지식문서를 등록해 AI 보고서를 생성합니다.
+8. 시연이 끝나면 **데모 종료**를 눌러 임시 데이터를 즉시 삭제합니다.
+
+페이지에 들어온 직후에는 영상을 자동 분석하지 않습니다. 카메라나 녹화 영상을 설정하기 전까지 입력 요청 메시지가 표시됩니다.
+
+## 카메라 2대와 전역 ID
+
+- 카메라 A와 B는 동일 제품이어도 브라우저의 `deviceId`로 구분합니다.
+- 두 카메라는 겹치는 구도와 분리된 구도를 모두 사용할 수 있습니다.
+- 시스템은 동시 관측과 카메라 간 이동 기록으로 배치 형태를 학습합니다.
+- 배치를 바꿨다면 분석 화면의 **배치 다시 학습**을 누릅니다.
+- 처음에는 한 사람씩 화면을 지나가게 하면 전역 ID와 BLE 연결을 안정적으로 초기화할 수 있습니다.
+- USB 대역폭이 부족하면 카메라를 서로 다른 USB 컨트롤러에 연결하세요.
+
+브라우저는 카메라별 320×240, 최대 10 FPS로 최신 프레임만 전송합니다. 서버가 오래된 프레임을 쌓지 않아 지연이 계속 누적되는 것을 방지합니다.
+
+## BLE / HM-10 설정
+
+BLE는 픽셀 좌표를 직접 측정하지 않습니다. 태그와 연결된 작업자의 장기 ID를 보호하고, 수신기 A/B의 RSSI 차이로 어느 카메라에 가까운지 보정합니다.
+
+Arduino 스케치는 분석 화면의 **Arduino 코드 받기** 또는 [frontend/public/hm10_ibeacon_scanner.ino](frontend/public/hm10_ibeacon_scanner.ino)에서 받을 수 있습니다.
+
+배선:
+
+```text
+HM-10 TXD -> Arduino D4
+Arduino D5 -> 전압 분배기 -> HM-10 RXD
+GND       -> GND
+VCC       -> 모듈 사양에 맞는 전원
+Serial    -> 9600 baud
+```
+
+스케치는 시작할 때 `AT`, `AT+IMME1`, `AT+ROLE1`, `AT+RESET`을 실행하고 `AT+DISI?`를 반복 호출해 iBeacon을 스캔합니다.
+
+연결 절차:
+
+1. 수신기 A를 카메라 A 옆, 수신기 B를 카메라 B 옆에 고정합니다.
+2. Arduino에 스케치를 업로드한 뒤 Serial Monitor를 닫습니다.
+3. HTTPS 페이지를 데스크톱 Chrome/Edge로 엽니다.
+4. BLE 수신기 A/B의 **USB 연결**을 각각 눌러 올바른 Arduino 포트를 선택합니다.
+5. 태그는 같은 UUID를 사용해도 되지만 Major/Minor 조합은 사람마다 다르게 설정합니다.
+6. 최초 등록은 한 사람씩 카메라 앞에 세우고 표시된 태그를 해당 `person-xxxxxx` ID에 연결합니다.
+
+Web Serial은 Safari와 iPhone 브라우저에서 지원되지 않습니다. iPhone은 iBeacon 송신 태그로 사용할 수 있지만 Arduino USB 수신기 연결은 데스크톱 Chrome/Edge에서 해야 합니다.
+
+## OpenAI RAG와 AI 보고서
+
+지식문서 등록과 검색에는 OpenAI Embeddings API를 사용합니다. 기본 모델은 `text-embedding-3-small`, 벡터 크기는 1024입니다.
+
+```dotenv
+OPENAI_API_KEY=발급받은_API_KEY
+EMBEDDING_MODEL_NAME=text-embedding-3-small
+EMBEDDING_DIM=1024
+
+OPENAI_ENABLED=1
+OPENAI_MODEL=gpt-4o-mini
+```
+
+- 허용 문서: `.txt`, `.md`, `.pdf`
+- 최대 크기: 10 MB
+- 문서는 현장별로 분리되어 검색됩니다.
+- AI 보고서는 Risk Engine의 점수와 위험등급을 변경하지 못하며 설명과 권고만 생성합니다.
+- 검색 결과가 약하거나 OpenAI 호출이 실패하면 근거 부족을 표시한 기본 보고서를 사용합니다.
+- API 키 없이 지식문서를 등록하면 임베딩 생성에 실패합니다.
+
+API 키와 Supabase service-role key는 반드시 백엔드 `.env`에만 두고 프론트엔드 변수나 Git에 넣지 마세요.
+
+## 데이터베이스와 저장소
+
+### 기본 로컬 구성
+
+```dotenv
+DATABASE_URL=sqlite:///./safety.db
+LOCAL_STORAGE_ROOT=storage
+```
+
+일반 실행 스크립트는 백엔드 디렉터리에서 서버를 시작하므로 SQLite 파일은 보통 `backend/safety.db`, 업로드 파일은 `backend/storage/`에 생성됩니다.
+
+### Supabase 구성
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
+SUPABASE_URL=https://[PROJECT].supabase.co
+SUPABASE_SERVICE_ROLE_KEY=[SERVICE_ROLE_KEY]
+SUPABASE_DOCUMENT_BUCKET=safety-documents
+SUPABASE_SNAPSHOT_BUCKET=event-snapshots
+SUPABASE_CLIP_BUCKET=event-clips
+```
+
+세 bucket은 private으로 생성하는 것을 권장합니다. `SUPABASE_URL`과 service-role key를 모두 설정하면 Supabase Storage를 사용하고, 둘 다 없으면 로컬 저장소를 사용합니다. PostgreSQL에서는 pgvector를 사용하며 서버 시작 시 필요한 테이블·인덱스·시간 컬럼 마이그레이션을 확인합니다.
+
+## JupyterHub 외부 배포
+
+최초 설치:
 
 ```bash
 bash deploy/jupyterhub/install.sh
-bash deploy/jupyterhub/service.sh start
 ```
 
-운영 명령:
+서비스 관리:
 
 ```bash
+bash deploy/jupyterhub/service.sh start
 bash deploy/jupyterhub/service.sh status
 bash deploy/jupyterhub/service.sh logs
 bash deploy/jupyterhub/service.sh restart
 bash deploy/jupyterhub/service.sh stop
 ```
 
-코드 갱신:
+GitHub 최신 버전 배포:
 
 ```bash
 bash deploy/jupyterhub/update.sh
 ```
 
-`update.sh`는 tracked 파일에 로컬 수정이 있으면 안전하게 중단하고, 문제가 없을 때만 `git pull --ff-only` → 의존성 동기화 → 프런트엔드 빌드 → 서비스 재시작을 수행합니다.
+Quick Tunnel URL은 재시작하면 바뀝니다. 고정 URL은 Cloudflare named tunnel의 token과 `PUBLIC_URL`을 `.env`에 설정하세요. 자세한 절차는 [docs/deployment-jupyterhub.md](docs/deployment-jupyterhub.md)를 참고하세요.
 
-Quick Tunnel은 시작할 때 `https://<random>.trycloudflare.com` 주소를 만들며 재시작할 때 URL이 바뀝니다. 데모 편의 기능일 뿐 가용성 보장이 없으므로 심사 직전에는 재시작하지 않는 것이 좋습니다. 고정 주소가 필요하면 Cloudflare named tunnel의 토큰과 `PUBLIC_URL`을 `.env`에 설정하세요.
+## 테스트와 빌드
 
-자세한 운영 절차는 [JupyterHub 배포 가이드](docs/deployment-jupyterhub.md)를 참고하세요.
-
-## 평가 데이터셋: 무엇을 평가하는가?
-
-`evaluation/`은 모델이 단지 영상을 처리하는지가 아니라 **안전 규칙을 올바른 맥락에서 적용하는지** 반복 검증하기 위한 40개 고정 시나리오입니다.
-
-| 그룹 | 영상 | 쉽게 말하면 확인하는 질문 | 대표 시나리오 |
-|---|---:|---|---|
-| 안전모·구역 | C001~C016, 16개 | 안전모를 제대로 구분하고, 위험구역 안/밖에 따라 경고가 달라지는가? | 일반 모자를 안전모로 오인하지 않기, 작업구역 미착용, 출입금지 접근·침입 |
-| 행동 | C017~C028, 12개 | 정상 행동과 실제 위험 행동을 구분하는가? | 정상 보행, 천천히 앉기, 물건 줍기, 주저앉음, 쓰러짐, 장시간 정지 |
-| 폭염 맥락 | C029~C036, 8개 | 같은 행동도 폭염 여부에 따라 올바른 사건으로 분류하고 노출 시간을 관리하는가? | 일반/폭염 주저앉음 비교, 폭염 쓰러짐, 10초 노출 휴식 권고, 타이머 초기화 |
-| 사람 추적 | C037~C040, 4개 | 가림·교차·재등장 상황에서도 사람 수와 ID가 안정적인가? | 1인 이동, 1초 가림, 2인 교차, 화면 이탈 후 재진입 |
-
-### 평가 항목을 쉽게 읽는 법
-
-#### 1. 안전모 성능
-
-- **Precision(정밀도)**: “미착용”이라고 경고한 것 중 실제 미착용의 비율입니다. 낮으면 오경보가 많습니다.
-- **Recall(재현율)**: 실제 미착용 상황 중 시스템이 잡아낸 비율입니다. 낮으면 위험을 놓칩니다.
-- **F1**: Precision과 Recall의 균형 점수입니다. 두 값 중 하나만 높을 때 과대평가되는 것을 막습니다.
-- **Known coverage**: 안전모 상태가 `unknown`이 아니라 착용/미착용으로 판정된 관측 비율입니다.
-
-안전 시스템에서는 Recall이 특히 중요하지만, Precision이 너무 낮으면 반복 오경보 때문에 실제 경고도 무시될 수 있으므로 F1을 함께 봐야 합니다.
-
-#### 2. 행동 분류
-
-- **Accuracy**: 20개 행동 평가 대상 중 최종 상태를 정확히 맞힌 비율입니다.
-- **Macro F1**: 행동 상태별 F1을 동등한 비중으로 평균낸 값입니다. 정상 영상 수가 많아도 위험 행동 실패를 숨기기 어렵습니다.
-- **Confusion matrix**: 실제 상태를 어떤 상태로 잘못 판단했는지 보여 줍니다. 예를 들어 실제 `FALL`이 `SUDDEN_SIT`으로 많이 분류되는지 확인할 수 있습니다.
-
-#### 3. 위험 사건
-
-사건은 프레임 수가 아니라 `person_episode` 단위로 셉니다. 한 사람이 5초 동안 계속 안전모를 쓰지 않았으면 수백 프레임이 아니라 `no_helmet` 1건입니다. 두 사람이 같은 위험을 만들었다면 2건입니다.
-
-- **TP**: 기대한 사건을 정확히 발생시킴
-- **FP**: 없어야 하는 사건을 잘못 발생시킴
-- **FN**: 있어야 하는 사건을 놓침
-- **Precision / Recall / F1**: 위 TP·FP·FN을 사건 단위로 계산
-
-`fall_still`은 먼저 `fall`을 거치므로 하나의 영상에서 두 종류의 사건을 순서대로 기대할 수 있습니다.
-
-#### 4. 사람 수
-
-- **Exact accuracy**: 영상의 정답 인원 수를 정확히 맞힌 비율입니다.
-- **MAE**: 예측 인원과 실제 인원의 평균 차이입니다. `0`에 가까울수록 좋습니다.
-
-#### 5. 폭염 상태
-
-- **Rest-needed accuracy**: 폭염에 10초 이상 노출됐을 때 휴식 권고가 켜지는지 평가합니다.
-- **Timer-reset accuracy**: 비폭염 상태가 10초 지속된 뒤 누적 노출 시간이 초기화되는지 평가합니다.
-
-실제 고온에서 촬영하지 않습니다. `heat_fixtures.json`이 영상 시간에 맞춰 폭염 맥락을 안전하게 주입합니다.
-
-#### 6. 추적 안정성
-
-현재 정답표는 프레임별 바운딩박스와 실제 ID를 제공하지 않습니다. 따라서 MOTA·IDF1·HOTA 대신 영상 안에서 ID가 불필요하게 쪼개진 횟수를 보는 **track fragmentation proxy**를 사용합니다. 값이 작을수록 안정적입니다.
-
-### 평가 데이터 검사
-
-정답표 구조만 검사:
-
-```bash
-python evaluation/scripts/validate_dataset.py
-```
-
-영상 40개까지 반드시 존재해야 통과하는 엄격 검사:
-
-```bash
-python evaluation/scripts/validate_dataset.py --require-videos
-```
-
-검증기는 다음을 확인합니다.
-
-- CSV 열과 C001~C040 순서
-- 중복 ID·파일명과 허용된 상태/이벤트 값
-- 기대 이벤트 수와 `person_episode` 단위
-- 폭염 fixture 연결
-- 영상 존재 여부와 재생 가능 여부
-- 목표 길이 허용 범위, 가로 화면, 권장 FPS
-
-영상 파일은 `clip_annotations.csv`의 `file_name`과 **정확히 같은 이름**으로 `evaluation/videos/`에 저장해야 합니다. 예를 들어 `general_helmet_near_01.mp4`가 정답이며 `C001general_helmet_near_01.mp4`는 다른 파일명으로 처리됩니다. 원본 영상과 결과 파일은 용량과 개인정보 문제로 Git에서 제외됩니다.
-
-### 평가 파일 구조
-
-```text
-evaluation/
-├─ annotations/
-│  ├─ clip_annotations.csv   # 40개 영상의 정답표
-│  └─ SCHEMA.md              # 각 열과 사건 수 계산 규칙
-├─ configs/
-│  ├─ heat_fixtures.json     # 폭염/비폭염 시간 구간
-│  └─ README.md              # 폭염·구역 fixture 작성법
-├─ scripts/
-│  └─ validate_dataset.py    # 정답표와 영상 사전 검사
-├─ videos/                   # 평가 MP4, Git 제외
-├─ results/                  # 원시 예측·지표·checkpoint, Git 제외
-├─ reports/                  # 사람이 읽는 요약 보고서
-└─ VIDEO_RECORDING_GUIDE.md  # 안전수칙과 40개 촬영 지시서
-```
-
-더 자세한 내용:
-
-- [평가 데이터셋 안내](evaluation/README.md)
-- [정답표 스키마](evaluation/annotations/SCHEMA.md)
-- [40개 영상 촬영 가이드](evaluation/VIDEO_RECORDING_GUIDE.md)
-- [평가 fixture 설정](evaluation/configs/README.md)
-
-### 현재 평가 자동화 범위와 한계
-
-현재 Git 저장소에 포함된 공식 평가 도구는 `validate_dataset.py`까지입니다. 이 스크립트는 데이터셋의 형식과 영상 메타데이터를 검증하지만 모델을 실행해 점수를 산출하지는 않습니다. 로컬에서 생성된 `metrics_*.json`, `predictions_*.csv`, `checkpoint_*.json`은 `evaluation/results/` 아래의 실행 산출물이며 Git에 포함되지 않습니다.
-
-향후 완전한 오프라인 평가기는 다음 조건을 지켜야 합니다.
-
-1. `frame_index / fps`를 영상 시간으로 사용합니다.
-2. 클립마다 추적기·행동 상태·폭염 누적시간을 초기화합니다.
-3. 구역 영상은 첫 프레임에 맞춘 정규화 폴리곤 fixture를 주입합니다.
-4. 사건을 `person_episode` 단위로 집계합니다.
-5. 중단 후 재개할 수 있도록 checkpoint와 클립별 예측을 저장합니다.
-
-현재 정답에는 바운딩박스가 없어 mAP@50/mAP@50:95를 계산할 수 없고, 프레임별 실제 ID가 없어 MOTA/IDF1/HOTA를 계산할 수 없습니다. 또한 구역 폴리곤 fixture가 확정되지 않은 영상은 구역 지표에서 제외했다는 사실을 결과와 함께 명시해야 합니다. 이 제한을 숨기지 않는 것이 평가 결과를 올바르게 해석하는 데 중요합니다.
-
-## 테스트와 품질 검사
-
-### 백엔드 전체 테스트
+백엔드 전체 테스트:
 
 ```bash
 cd backend
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests
 ```
 
-Windows에서는 `.venv\Scripts\python`을 사용합니다.
-
-테스트 범위에는 배포 설정, 사건 에피소드, 기상청 시간 처리, LLM fallback과 인용, 사람 추적, RAG, 순위, 위험 엔진, 현장 격리, 이벤트 정책, 구역 삭제가 포함됩니다.
-
-### 프런트엔드
+프론트엔드 검사와 빌드:
 
 ```bash
 cd frontend
 npm run lint
 npm run build
-npm audit --audit-level=high
 ```
 
-### 백엔드 의존성·문법
+오프라인 영상 분석:
 
 ```bash
-backend/.venv/bin/python -m pip check
 cd backend
-.venv/bin/python -m compileall -q app tests
+.venv/bin/python -m scripts.analyze_video2 /path/to/video.mp4
 ```
 
-## API 개요
-
-개발 서버 실행 후 `http://localhost:8000/docs`에서 전체 OpenAPI 문서를 확인할 수 있습니다.
-
-| 경로 | 역할 |
-|---|---|
-| `GET /health` | 서버·DB·LLM 설정 상태 |
-| `/api/auth` | 회원가입, 로그인, 세션 |
-| `/api/sites` | 사용자별 현장 관리 |
-| `/api/zones` | 위험구역과 카메라 ROI 관리 |
-| `/api/analysis` | 분석 상태, 프레임, snapshot |
-| `/api/events` | 이벤트 로그와 사건 에피소드 |
-| `/api/heat` | 체감온도, 폭염 demo와 임계값 |
-| `/api/risk` | 위험 추세, 예측, AI 보고서 |
-| `/api/knowledge` | 안전 문서와 인용 원문 |
-| `/api/rankings` | 회사·현장·구역별 오늘의 안전 순위 |
-| `/api/admin` | 플랫폼 관리자 통계·사용자·감사 로그 |
-| `WS /ws` | 실시간 분석 요약 |
-| `WS /ws/camera-upload` | 브라우저 JPEG 프레임 업로드 |
-
-인증이 필요한 데이터는 현재 선택된 현장으로 범위가 제한됩니다. 다른 사용자의 현장·사건·문서 chunk를 ID만 바꿔 조회할 수 없도록 서버에서 소유권을 검사합니다.
-
-## 프로젝트 구조
-
-```text
-.
-├─ backend/
-│  ├─ app/
-│  │  ├─ routers/              # 인증·현장·이벤트·위험·RAG API
-│  │  ├─ services/             # 검출·추적·행동·폭염·위험 엔진
-│  │  ├─ services/rag/         # 문서 인덱싱·임베딩·검색
-│  │  ├─ main.py               # FastAPI, WebSocket, 보안 헤더, React 제공
-│  │  ├─ models.py             # SQLAlchemy 모델
-│  │  └─ schemas.py            # API 스키마와 시간 직렬화
-│  ├─ scripts/                 # 분석·관리 명령
-│  └─ tests/                   # 백엔드 회귀 테스트
-├─ frontend/
-│  └─ src/
-│     ├─ App.jsx               # 인증·관제·현장 경험
-│     ├─ BrowserCameraController.jsx
-│     ├─ ZoneEditor.jsx
-│     ├─ RiskDashboard.jsx
-│     ├─ RankingDashboard.jsx
-│     └─ AdminDashboard.jsx
-├─ evaluation/                 # 40개 영상 평가 명세와 검증기
-├─ deploy/jupyterhub/          # 설치·실행·상태·업데이트 스크립트
-├─ docs/                       # 배포 문서
-├─ .env.example               # 전체 환경변수 예시
-├─ start.sh / start.ps1       # 로컬 개발 실행
-└─ README.md
-```
+평가 데이터셋과 지표 산출 절차는 [evaluation/README.md](evaluation/README.md)를 참고하세요.
 
 ## 문제 해결
 
-| 증상 | 확인 방법 |
+| 증상 | 확인할 내용 |
 |---|---|
-| `deploy/jupyterhub/service.sh`가 없다고 나옴 | `pwd`와 `git status`를 확인하고 저장소 루트에서 실행. `test -f deploy/jupyterhub/service.sh`로 파일 존재 확인 |
-| 외부 URL이 표시되지 않음 | `service.sh logs`에서 Cloudflare 연결 확인. Quick Tunnel은 outbound 네트워크가 필요 |
-| 재시작 후 기존 URL이 안 열림 | Quick Tunnel 주소는 재시작할 때 변경됨. `service.sh status`의 새 URL 사용 |
-| 로그인 유지가 안 됨 | 외부 HTTPS 배포에서 `COOKIE_SECURE=1` 확인 후 재시작 |
-| 분석 프레임이 잠시 503 | 모델·영상 준비 중일 수 있음. `/api/analysis/status`와 로그 확인 |
-| 체감온도가 안 나옴 | `KMA_API_KEY`, 실외 현장 여부, 좌표, 서버 시간대를 확인하고 재시작 |
-| AI 보고서가 기본 문구만 사용 | `OPENAI_ENABLED`, API 키, 모델, base URL과 서비스 로그 확인 |
-| 인용 원문을 찾지 못함 | 문서가 현재 현장에 속하는지, 문서가 삭제되지 않았는지 확인 |
-| PostgreSQL 연결 실패 | provider 연결 문자열과 URL 인코딩 여부 확인. 일반 `postgresql://` URL은 psycopg3 형식으로 자동 정규화됨 |
+| 카메라를 찾을 수 없음 | HTTPS/localhost인지, 브라우저 권한이 허용됐는지, 다른 앱이 카메라를 사용 중인지 확인 |
+| 같은 제품 카메라 두 대 중 하나만 열림 | 서로 다른 `deviceId`를 선택하고 가능하면 다른 USB 컨트롤러에 연결 |
+| 분석 박스가 느리거나 잔상이 보임 | 화면의 전송/처리 FPS, `MODEL_IMAGE_SIZE`, `LIVE_INFER_EVERY`, GPU 사용률 확인 |
+| 교차할 때 ID가 바뀜 | 전신이 보이게 배치하고 FastReID 가중치·CUDA 로드 확인, BLE 태그를 초기 ID에 연결 |
+| BLE USB 버튼이 동작하지 않음 | 데스크톱 Chrome/Edge와 HTTPS 사용, Serial Monitor 종료 후 포트 재선택 |
+| 태그가 나타나지 않음 | HM-10 central 설정, iBeacon 송신 상태, UUID/Major/Minor, 9600 baud 확인 |
+| 지식문서 업로드 실패 | `OPENAI_API_KEY`, 임베딩 차원, Supabase bucket 또는 로컬 저장소 권한 확인 |
+| AI 보고서에 문서가 반영되지 않음 | 문서 chunk 수, RAG 유사도 임계값, 서버의 `RAG retrieval` 로그 확인 |
+| 외부 URL 접속 실패 | `service.sh status`, `service.sh logs`, cloudflared 상태 확인 |
 
 ## 보안과 운영 주의사항
 
-- `.env`, DB, 모델, 평가 영상과 결과 파일은 Git에 포함하지 않습니다.
-- `.env`는 `chmod 600 .env`로 소유자만 읽게 합니다.
-- 외부 HTTPS에서는 `COOKIE_SECURE=1`을 사용합니다.
-- API 키, Supabase service-role key, Cloudflare tunnel token을 README·로그·메신저에 붙여 넣지 않습니다.
-- 실제 작업자 영상을 수집할 때 사전 동의, 보관 기간, 접근 권한과 폐기 절차를 정합니다.
-- Quick Tunnel은 시연용입니다. 지속 운영은 named tunnel, 모니터링, 백업과 장애 복구 절차가 필요합니다.
-- 이 시스템은 안전관리 보조 도구이며 법적·산업안전 인증 장비를 대체하지 않습니다. 모델의 누락과 오경보를 전제로 사람이 최종 판단해야 합니다.
+- `.env`, API 키, Supabase service-role key, Cloudflare tunnel token을 커밋하지 마세요.
+- 공개 데모에는 실제 개인정보나 민감한 현장 영상을 올리지 마세요.
+- 데모 종료 버튼을 누르면 해당 임시 사용자의 기록과 파일이 삭제됩니다.
+- 서버가 비정상 종료되어도 다음 시작 시 만료 데모 계정 정리를 다시 수행합니다.
+- Quick Tunnel은 접근 인증을 제공하지 않으므로 필요하면 Cloudflare Access나 별도 접근제어를 추가하세요.
+- 이 시스템의 위험 점수는 관측된 위험행동 추세이며 실제 사고 확률이나 법적 안전판정을 의미하지 않습니다.
 
-## 설계 원칙
+## 저장소 구조
 
-1. **맥락 우선** — 객체가 보였다는 이유만으로 사건을 만들지 않고 구역·행동·폭염 맥락을 함께 판단합니다.
-2. **사건 단위 기록** — 반복 프레임을 사건 에피소드로 집계해 통계가 부풀려지지 않게 합니다.
-3. **결정론적 위험 등급** — LLM은 설명을 담당하고 최종 위험 등급은 Risk Engine이 유지합니다.
-4. **근거를 확인할 수 있는 보고서** — AI 권고에 문서 chunk를 연결하고 사용자가 원문을 직접 열 수 있게 합니다.
-5. **현장 격리** — 모든 사용자 데이터는 현재 현장 소유권으로 제한합니다.
-6. **실패 시 기능 유지** — OpenAI나 외부 Storage 일부가 실패해도 가능한 범위에서 fallback으로 계속 동작합니다.
+```text
+backend/                 FastAPI, 분석 파이프라인, DB, RAG, 테스트
+frontend/                React/Vite 분석·설정 화면
+frontend/public/         Arduino 스케치와 정적 자산
+deploy/jupyterhub/       설치·서비스·업데이트 스크립트
+docs/                    배포 문서
+evaluation/              영상 평가 데이터셋·도구·보고서
+start.sh / start.ps1     로컬 개발 실행 스크립트
+```

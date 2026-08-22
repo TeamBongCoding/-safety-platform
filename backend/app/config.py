@@ -27,9 +27,7 @@ def normalize_database_url(value: str) -> str:
     return value
 
 
-ANALYSIS_ENABLED = os.getenv("ANALYSIS_ENABLED", "0") == "1"
 KMA_API_KEY = os.getenv("KMA_API_KEY")
-VIDEO_SOURCE = os.getenv("VIDEO_SOURCE")
 
 # Supabase exposes standard PostgreSQL URLs, while this project installs the
 # modern psycopg v3 driver. Make copied dashboard URLs work without requiring
@@ -38,8 +36,11 @@ DATABASE_URL = normalize_database_url(
     os.getenv("DATABASE_URL", "sqlite:///./safety.db")
 )
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
-SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+DEMO_IDLE_MINUTES = max(1, int(os.getenv("DEMO_IDLE_MINUTES", "30")))
+DEMO_MAX_HOURS = max(1, int(os.getenv("DEMO_MAX_HOURS", "2")))
+DEMO_CLEANUP_INTERVAL_SECONDS = max(10, int(os.getenv("DEMO_CLEANUP_INTERVAL_SECONDS", "60")))
+DEMO_MAX_ACTIVE_SESSIONS = max(1, int(os.getenv("DEMO_MAX_ACTIVE_SESSIONS", "5")))
 CORS_ORIGINS = _csv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
@@ -56,13 +57,28 @@ _default_font_path = (
 )
 FONT_PATH = os.getenv("FONT_PATH", _default_font_path)
 TRACK_MAX_MISSED_FRAMES = int(os.getenv("TRACK_MAX_MISSED_FRAMES", "12"))
+REID_ENABLED = os.getenv("REID_ENABLED", "1") == "1"
+_reid_weights = Path(
+    os.getenv("FASTREID_WEIGHTS_PATH", "backend/weights/market_bot_R50.pth")
+)
+FASTREID_WEIGHTS_PATH = (
+    _reid_weights if _reid_weights.is_absolute() else PROJECT_ROOT / _reid_weights
+)
+REID_DEVICE = os.getenv("REID_DEVICE", "auto")
+REID_MATCH_THRESHOLD = float(os.getenv("REID_MATCH_THRESHOLD", "0.72"))
+REID_GALLERY_SECONDS = float(os.getenv("REID_GALLERY_SECONDS", "120"))
+REID_SWITCH_MARGIN = float(os.getenv("REID_SWITCH_MARGIN", "0.10"))
+REID_SWITCH_CONFIRM_FRAMES = int(os.getenv("REID_SWITCH_CONFIRM_FRAMES", "3"))
+REID_FRAME_GAP_SECONDS = float(os.getenv("REID_FRAME_GAP_SECONDS", "0.45"))
+TRACK_BUFFER_FRAMES = int(os.getenv("TRACK_BUFFER_FRAMES", "90"))
+BLE_TAG_ACTIVE_SECONDS = float(os.getenv("BLE_TAG_ACTIVE_SECONDS", "20"))
 # ── Pose 행동 감지 ────────────────────────────────────────────────
 POSE_ENABLED = os.getenv("POSE_ENABLED", "0") == "1"
 POSE_MODEL_PATH = os.getenv("POSE_MODEL_PATH", "weights/yolo11n-pose.pt")
 DEBUG_POSE = os.getenv("DEBUG_POSE", "0") == "1"
 POSE_KEYPOINT_CONF = float(os.getenv("POSE_KEYPOINT_CONF", "0.4"))
 POSE_INFER_EVERY = int(os.getenv("POSE_INFER_EVERY", "2"))
-LIVE_INFER_EVERY = int(os.getenv("LIVE_INFER_EVERY", "4"))
+LIVE_INFER_EVERY = int(os.getenv("LIVE_INFER_EVERY", "2"))
 LIVE_POSE_INFER_EVERY = int(os.getenv("LIVE_POSE_INFER_EVERY", "6"))
 FALL_BBOX_RATIO = float(os.getenv("FALL_BBOX_RATIO", "1.2"))
 FALL_BODY_ANGLE = float(os.getenv("FALL_BODY_ANGLE", "40.0"))
@@ -100,7 +116,7 @@ OPENAI_BASE_URL = (
 )
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT_SEC = float(os.getenv("OPENAI_TIMEOUT_SEC", "60"))
-OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "1800"))
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 # ── Supabase ──────────────────────────────────────────────────────
@@ -110,17 +126,10 @@ SUPABASE_DOCUMENT_BUCKET = os.getenv("SUPABASE_DOCUMENT_BUCKET", "safety-documen
 SUPABASE_SNAPSHOT_BUCKET = os.getenv("SUPABASE_SNAPSHOT_BUCKET", "event-snapshots")
 SUPABASE_CLIP_BUCKET = os.getenv("SUPABASE_CLIP_BUCKET", "event-clips")
 # ── RAG / Embedding ───────────────────────────────────────────────
-EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "auto").strip().lower()
-if EMBEDDING_PROVIDER not in {"auto", "local", "openai"}:
-    raise ValueError("EMBEDDING_PROVIDER는 auto, local, openai 중 하나여야 합니다.")
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
-OPENAI_EMBEDDING_MODEL = os.getenv(
-    "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
-)
-OPENAI_EMBEDDING_BATCH_SIZE = max(
-    1, int(os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", "64"))
-)
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
-RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.7"))
+EMBEDDING_BATCH_SIZE = max(1, min(2048, int(os.getenv("EMBEDDING_BATCH_SIZE", "128"))))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "8"))
+RAG_THRESHOLD = float(os.getenv("RAG_THRESHOLD", "0.55"))
+RAG_FALLBACK_THRESHOLD = float(os.getenv("RAG_FALLBACK_THRESHOLD", "0.35"))
 # ──────────────────────────────────────────────────────────────────

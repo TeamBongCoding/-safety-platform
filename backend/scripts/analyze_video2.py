@@ -1,6 +1,6 @@
 """Offline test-video analysis with local tracking and safety zones.
 
-Run from backend: python -m scripts.analyze_video2 ../data/videos/site1.mp4
+Run from backend: python -m scripts.analyze_video2 <video_path>
 """
 
 import json
@@ -56,7 +56,8 @@ def main(video_path, out_path="output2.mp4"):
         ok, frame = cap.read()
         if not ok:
             break
-        if frame_index % INFER_EVERY == 0:
+        detections_fresh = frame_index % INFER_EVERY == 0
+        if detections_fresh:
             detections = detector.detect(frame)
         frame, events, _ = process_frame(
             frame,
@@ -66,6 +67,7 @@ def main(video_path, out_path="output2.mp4"):
             height,
             tracker,
             include_status=True,
+            detections_fresh=detections_fresh,
         )
         for event in events:
             print(f"[ALERT] frame {frame_index}: {event['type']}")
@@ -78,4 +80,7 @@ def main(video_path, out_path="output2.mp4"):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "../data/videos/site1.mp4")
+    if len(sys.argv) < 2:
+        raise SystemExit("사용법: python -m scripts.analyze_video2 <video_path>")
+
+    main(sys.argv[1])

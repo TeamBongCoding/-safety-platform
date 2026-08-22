@@ -3,10 +3,10 @@ import { fetchRiskConfig, fetchRiskOverview, generateRiskReport, fetchLatestRepo
 import { formatKoreanDateTime } from './time'
 
 const RISK_LEVEL_STYLE = {
-  low:      { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
-  medium:   { border: 'border-amber-500/30',   bg: 'bg-amber-500/10',   text: 'text-amber-300',   badge: 'bg-amber-500/20 text-amber-200' },
-  high:     { border: 'border-orange-500/30',  bg: 'bg-orange-500/10',  text: 'text-orange-300',  badge: 'bg-orange-500/20 text-orange-200' },
-  critical: { border: 'border-red-500/30',     bg: 'bg-red-500/10',     text: 'text-red-300',     badge: 'bg-red-500/20 text-red-200' },
+  low:      { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', bar: 'bg-emerald-500', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
+  medium:   { border: 'border-amber-500/30',   bg: 'bg-amber-500/10',   bar: 'bg-amber-500',   text: 'text-amber-300',   badge: 'bg-amber-500/20 text-amber-200' },
+  high:     { border: 'border-orange-500/30',  bg: 'bg-orange-500/10',  bar: 'bg-orange-500',  text: 'text-orange-300',  badge: 'bg-orange-500/20 text-orange-200' },
+  critical: { border: 'border-red-500/30',     bg: 'bg-red-500/10',     bar: 'bg-red-500',     text: 'text-red-300',     badge: 'bg-red-500/20 text-red-200' },
 }
 
 const RISK_LABEL = { low: '낮음', medium: '보통', high: '높음', critical: '위험' }
@@ -16,6 +16,8 @@ const EVENT_LABELS = {
   fall_still: '쓰러짐+정지', fall_risk_entry: '추락위험 진입',
   heavy_equipment_entry: '중장비 작업반경', stagger: '휘청거림',
   sudden_sit: '주저앉음', heat_fall: '폭염 쓰러짐', heat_stagger: '폭염 휘청거림',
+  heat_fall_still: '폭염 쓰러짐+정지', heat_sudden_sit: '폭염 주저앉음',
+  zone_approach: '위험구역 접근',
 }
 const DEFAULT_RISK_CONFIG = {
   mode: 'production',
@@ -25,6 +27,22 @@ const DEFAULT_RISK_CONFIG = {
 
 
 function eventLabel(type) { return EVENT_LABELS[type] || type }
+
+function formatKstDateTime(value) {
+  if (!value) return '-'
+  const timePart = value.slice(10)
+  const hasTimeZone = value.endsWith('Z') || timePart.includes('+') || timePart.includes('-')
+  const timestamp = hasTimeZone ? value : `${value}+09:00`
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(timestamp))
+}
 
 function RiskBadge({ level }) {
   const s = RISK_LEVEL_STYLE[level] || RISK_LEVEL_STYLE.low
@@ -37,12 +55,13 @@ function RiskBadge({ level }) {
 
 function ScoreBar({ score, level }) {
   const s = RISK_LEVEL_STYLE[level] || RISK_LEVEL_STYLE.low
+  const normalizedScore = Math.min(100, Math.max(0, Number(score) || 0))
   return (
     <div className="flex items-center gap-3">
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
         <div
-          className={`h-full rounded-full transition-all duration-500 ${s.bg.replace('/10', '/80')}`}
-          style={{ width: `${Math.min(100, score)}%` }}
+          className={`h-full rounded-full transition-all duration-500 ${s.bar}`}
+          style={{ width: `${normalizedScore}%` }}
         />
       </div>
       <span className={`w-10 text-right text-sm font-bold tabular-nums ${s.text}`}>{score.toFixed(0)}</span>
@@ -71,10 +90,10 @@ function OverviewTab({ onError, riskConfig }) {
   }, [horizon, onError])
 
   useEffect(() => {
-    const timer = window.setTimeout(load, 0)
+    const initial = window.setTimeout(() => load(), 0)
     const interval = window.setInterval(() => load(false), Math.max(1, riskConfig.refresh_seconds) * 1000)
     return () => {
-      window.clearTimeout(timer)
+      window.clearTimeout(initial)
       window.clearInterval(interval)
     }
   }, [load, riskConfig.refresh_seconds])
@@ -173,8 +192,8 @@ function ReportTab({ onError, riskConfig }) {
   }, [horizon, eventType])
 
   useEffect(() => {
-    const timer = window.setTimeout(loadLatest, 0)
-    return () => window.clearTimeout(timer)
+    const initial = window.setTimeout(() => loadLatest(), 0)
+    return () => window.clearTimeout(initial)
   }, [loadLatest])
 
   const generate = async () => {
@@ -272,7 +291,7 @@ function ReportTab({ onError, riskConfig }) {
             <div className="flex items-center gap-3">
               <span className="text-sm text-slate-400">{eventLabel(report.event_type)}</span>
               <RiskBadge level={report.risk_level} />
-              <span className="ml-auto text-xs text-slate-500">{formatKoreanDateTime(report.generated_at)}</span>
+              <span className="ml-auto text-xs text-slate-500">{formatKstDateTime(report.generated_at)} KST</span>
             </div>
             <div className="mt-2 flex items-center gap-2">
               <span className={`text-3xl font-bold tabular-nums ${(RISK_LEVEL_STYLE[report.risk_level] || RISK_LEVEL_STYLE.low).text}`}>{report.risk_score.toFixed(0)}</span>
@@ -316,19 +335,13 @@ function ReportTab({ onError, riskConfig }) {
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-xs font-bold text-cyan-300">{rec.priority}</span>
                         <div>
                           <p className="font-medium text-slate-200">{rec.action}</p>
-                          <p className="text-slate-500">
-                            {reason}
-                            {citationNumber && (
-                              <button
-                                type="button"
-                                onClick={() => showSource(rec.source_chunk_id, source.title)}
-                                className="ml-1 align-super text-[10px] font-semibold text-cyan-400 hover:text-cyan-200 hover:underline"
-                                aria-label={`참고 문서 ${citationNumber} 열기`}
-                              >
-                                [{citationNumber}]
-                              </button>
-                            )}
-                          </p>
+                          <p className="text-slate-500">{rec.reason}</p>
+                          {rec.source_chunk_id != null && (
+                            <p className="mt-0.5 text-xs font-medium text-cyan-400">문서 근거 [청크 {rec.source_chunk_id}]</p>
+                          )}
+                          {rec.source_chunk_id == null && rec.reason?.startsWith('[AI 자율 제안]') && (
+                            <p className="mt-0.5 text-xs font-medium text-violet-400">AI 자율 제안</p>
+                          )}
                         </div>
                       </li>
                       )
@@ -418,21 +431,26 @@ function EpisodesTab({ onError }) {
   const [note, setNote] = useState('')
   const [resolvingId, setResolvingId] = useState(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true)
     try {
-      const data = await fetchEpisodes({ resolved: showResolved, limit: 50 })
+      const params = showResolved ? { limit: 50 } : { resolved: false, limit: 50 }
+      const data = await fetchEpisodes(params)
       setEpisodes(data || [])
     } catch (err) {
       onError(err.message)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }, [showResolved, onError])
 
   useEffect(() => {
-    const timer = window.setTimeout(load, 0)
-    return () => window.clearTimeout(timer)
+    const initial = window.setTimeout(() => load(), 0)
+    const interval = window.setInterval(() => load(false), 5000)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(interval)
+    }
   }, [load])
 
   const doResolve = async (id) => {
@@ -477,7 +495,7 @@ function EpisodesTab({ onError }) {
                     {ep.resolved && <span className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-400">해결됨</span>}
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {formatKoreanDateTime(ep.started_at)}
+                    {formatKstDateTime(ep.started_at)} KST
                     {ep.duration_sec > 0 && ` · ${ep.duration_sec.toFixed(0)}초`}
                     {ep.observation_count > 1 && ` · ${ep.observation_count}회 관측`}
                     {ep.track_id && ` · 추적 ${ep.track_id}`}
@@ -534,8 +552,8 @@ function KnowledgeTab({ onError }) {
   }, [onError])
 
   useEffect(() => {
-    const timer = window.setTimeout(load, 0)
-    return () => window.clearTimeout(timer)
+    const initial = window.setTimeout(() => load(), 0)
+    return () => window.clearTimeout(initial)
   }, [load])
 
   const upload = async (e) => {

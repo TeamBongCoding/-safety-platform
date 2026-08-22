@@ -2,25 +2,6 @@
 
 set -Eeuo pipefail
 
-WITH_ANALYZER=0
-
-usage() {
-  cat <<'EOF'
-Usage: ./start.sh [options]
-
-Options:
-  --with-analyzer  Enable live AI analysis (ANALYSIS_ENABLED=1)
-  -h, --help       Show this help
-EOF
-}
-
-for argument in "$@"; do
-  case "$argument" in
-    --with-analyzer) WITH_ANALYZER=1 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $argument" >&2; usage >&2; exit 2 ;;
-  esac
-done
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$PROJECT_ROOT/backend"
@@ -126,10 +107,6 @@ FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 BACKEND_HEALTH_HOST="$BACKEND_HOST"
 [[ "$BACKEND_HEALTH_HOST" == "0.0.0.0" ]] && BACKEND_HEALTH_HOST="127.0.0.1"
 BACKEND_HEALTH_URL="http://${BACKEND_HEALTH_HOST}:${BACKEND_PORT}/health"
-
-if (( WITH_ANALYZER )); then
-  export ANALYSIS_ENABLED=1
-fi
 
 PIDS=()
 PROCESS_GROUPS=()

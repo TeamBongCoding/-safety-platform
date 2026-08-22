@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import AdminDashboard from './AdminDashboard'
 import BrowserCameraController from './BrowserCameraController'
-import RankingDashboard from './RankingDashboard'
+import BleSerialController from './BleSerialController'
 import RiskDashboard from './RiskDashboard'
 import ZoneEditor from './ZoneEditor'
 import { API_BASE, WS_URL, api } from './api'
@@ -53,58 +52,58 @@ export default function App() {
 
   if (session === undefined) return <LoadingScreen />
   if (!session) {
-    return <AuthScreen onAuthenticated={setSession} initialError={sessionError} />
-  }
-  if (session.user.role === 'platform_admin') {
-    return <AdminDashboard session={session} setSession={setSession} />
+    return <DemoStartScreen onStarted={setSession} initialError={sessionError} />
   }
   return <UserExperience session={session} setSession={setSession} />
 }
 
 function UserExperience({ session, setSession }) {
   const [screen, setScreen] = useState('dashboard')
-  if (screen === 'ranking') {
-    return (
-      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-[1400px]">
-          <RankingDashboard
-            currentCompany={session.user.company_name}
-            onBack={() => setScreen('dashboard')}
-          />
-        </div>
-      </main>
-    )
-  }
-  if (screen === 'risk') {
-    return (
-      <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-[1400px]">
-          <RiskDashboard onBack={() => setScreen('dashboard')} />
-        </div>
-      </main>
-    )
-  }
-  return <Dashboard session={session} setSession={setSession} onShowRanking={() => setScreen('ranking')} onShowRisk={() => setScreen('risk')} />
+
+  useEffect(() => {
+    let active = true
+    const heartbeat = () => {
+      api('/api/auth/heartbeat', { method: 'POST' }).catch((error) => {
+        if (active && error.status === 401) setSession(null)
+      })
+    }
+    const timer = window.setInterval(heartbeat, 30_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') heartbeat()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [setSession])
+
+  return (
+    <>
+      <div hidden={screen !== 'dashboard'}>
+        <Dashboard session={session} setSession={setSession} onShowRisk={() => setScreen('risk')} />
+      </div>
+      {screen === 'risk' && (
+        <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-[1400px]">
+            <RiskDashboard onBack={() => setScreen('dashboard')} />
+          </div>
+        </main>
+      )}
+    </>
+  )
 }
 
-function AuthScreen({ onAuthenticated, initialError }) {
-  const [mode, setMode] = useState('login')
+function DemoStartScreen({ onStarted, initialError }) {
   const [error, setError] = useState(initialError)
   const [submitting, setSubmitting] = useState(false)
 
-  const submit = async (event) => {
-    event.preventDefault()
+  const startDemo = async () => {
     setError('')
     setSubmitting(true)
-    const form = new FormData(event.currentTarget)
-    const payload = Object.fromEntries(form.entries())
-
     try {
-      const nextSession = await api(`/api/auth/${mode}`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
-      onAuthenticated(nextSession)
+      onStarted(await api('/api/auth/demo', { method: 'POST' }))
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -114,48 +113,28 @@ function AuthScreen({ onAuthenticated, initialError }) {
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#07111f] px-4 py-10 text-slate-100">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         <div className="mb-7 text-center">
           <p className="mb-2 text-xs font-semibold tracking-[0.24em] text-cyan-400">SITE SAFETY OPERATIONS</p>
           <h1 className="text-3xl font-bold text-white">AI 안전관리 플랫폼</h1>
-          <p className="mt-2 text-sm text-slate-400">내 현장의 작업자와 위험 상황을 안전하게 관리하세요.</p>
+          <p className="mt-2 text-sm text-slate-400">로그인 없이 독립된 임시 클라이언트 환경을 시작합니다.</p>
         </div>
-
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-black/30">
-          <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-950 p-1">
-            <AuthTab active={mode === 'login'} onClick={() => { setMode('login'); setError('') }}>로그인</AuthTab>
-            <AuthTab active={mode === 'signup'} onClick={() => { setMode('signup'); setError('') }}>회원가입</AuthTab>
-          </div>
-
-          <form className="space-y-4" onSubmit={submit}>
-            {mode === 'signup' && (
-              <>
-                <Field label="회사명" name="company_name" placeholder="예: 세이프 건설" required />
-                <Field label="담당자명" name="manager_name" placeholder="예: 김안전" required />
-                <Field label="첫 현장명" name="site_name" placeholder="예: 서울 물류센터" required />
-              </>
-            )}
-            <Field label="이메일" name="email" type="email" placeholder="manager@company.com" autoComplete="email" required />
-            <Field
-              label="비밀번호"
-              name="password"
-              type="password"
-              minLength="8"
-              placeholder="8자 이상 입력"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              required
-            />
-
-            {error && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
-            >
-              {submitting ? '처리 중...' : mode === 'login' ? '관제센터 로그인' : '계정 만들기'}
-            </button>
-          </form>
+          <h2 className="text-lg font-semibold text-white">클라이언트 데모 모드</h2>
+          <ul className="mt-4 space-y-2 text-sm text-slate-400">
+            <li>• 다른 사용자와 분리된 새 임시 계정과 현장이 할당됩니다.</li>
+            <li>• 종료 버튼을 누르면 영상 분석 기록과 업로드 자료가 삭제됩니다.</li>
+            <li>• 30분 동안 활동이 없거나 시작 후 2시간이 지나면 자동 삭제됩니다.</li>
+          </ul>
+          {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+          <button
+            type="button"
+            onClick={startDemo}
+            disabled={submitting}
+            className="mt-6 w-full rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
+          >
+            {submitting ? '임시 환경 준비 중...' : '클라이언트 데모 시작'}
+          </button>
         </section>
       </div>
     </main>
@@ -169,12 +148,12 @@ const heatLevelMeta = {
   severe: { label: '폭염 심각', color: 'red', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', badge: 'bg-red-500/20 text-red-200' },
 }
 
-function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
+function Dashboard({ session, setSession, onShowRisk }) {
   const currentSite = session.current_site
   const [connected, setConnected] = useState(false)
   const [summary, setSummary] = useState(null)
   const [events, setEvents] = useState([])
-  const [streamReady, setStreamReady] = useState(false)
+  const [streamReady, setStreamReady] = useState({ 'camera-1': false, 'camera-2': false })
   const [newSiteName, setNewSiteName] = useState('')
   const [newSiteLat, setNewSiteLat] = useState('')
   const [newSiteLon, setNewSiteLon] = useState('')
@@ -184,7 +163,8 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   const [demoTemp, setDemoTemp] = useState('')
   const [showDemoControls, setShowDemoControls] = useState(false)
   const [showCamSettings, setShowCamSettings] = useState(false)
-  const [cameraStreaming, setCameraStreaming] = useState(false)
+  const [cameraStreaming, setCameraStreaming] = useState({ 'camera-1': false, 'camera-2': false })
+  const [cameraDeviceIds, setCameraDeviceIds] = useState({ 'camera-1': '', 'camera-2': '' })
   const [confirmDeleteSite, setConfirmDeleteSite] = useState(false)
   const [deleteSiteId, setDeleteSiteId] = useState('')
   const [sunThreshold, setSunThreshold] = useState(1.15)
@@ -192,11 +172,36 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   const [cautionTemp, setCautionTemp] = useState(31.0)
   const [warningTemp, setWarningTemp] = useState(33.0)
   const [severeTemp, setSevereTemp] = useState(38.0)
+  const handleStreamingChange = useCallback((cameraId, isStreaming) => {
+    setCameraStreaming((current) => ({ ...current, [cameraId]: isStreaming }))
+    if (!isStreaming) {
+      setStreamReady((current) => ({ ...current, [cameraId]: false }))
+    }
+  }, [])
+  const handleCameraDeviceSelection = useCallback((cameraId, deviceId) => {
+    setCameraDeviceIds((current) => ({ ...current, [cameraId]: deviceId }))
+  }, [])
+  const anyCameraStreaming = Object.values(cameraStreaming).some(Boolean)
 
   const handleUnauthorized = useCallback((error) => {
     if (error.status === 401) setSession(null)
     else setNotice(error.message)
   }, [setSession])
+
+  const handleStreamLoad = useCallback((cameraId) => {
+    setStreamReady((current) => ({ ...current, [cameraId]: true }))
+  }, [])
+  const handleStreamError = useCallback((cameraId) => {
+    setStreamReady((current) => ({ ...current, [cameraId]: false }))
+  }, [])
+  const resetCameraCalibration = async () => {
+    try {
+      await api('/api/analysis/calibration/reset', { method: 'POST' })
+      setNotice('카메라 배치 학습을 초기화했습니다. 두 화면 사이를 한 번 걸어 주세요.')
+    } catch (error) {
+      handleUnauthorized(error)
+    }
+  }
 
   // 체감온도 상태 30초 폴링 — 서버 임계값으로 로컬 상태 초기화
   useEffect(() => {
@@ -373,9 +378,9 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
     }
   }
 
-  const logout = async () => {
+  const endDemo = async () => {
     try {
-      await api('/api/auth/logout', { method: 'POST' })
+      await api('/api/auth/demo', { method: 'DELETE' })
     } finally {
       setSession(null)
     }
@@ -394,10 +399,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
     if (!connected) return '서버 연결 대기'
     if (summary?.analysis_stage === 'loading') return 'AI 모델 준비 중'
     if (summary?.analysis_stage === 'waiting_camera' || summary?.analysis_stage === 'waiting_frame') return '카메라 연결 대기'
-    if (summary?.analysis_stage === 'camera_disconnected') return '카메라 연결 종료'
+    if (summary?.analysis_stage === 'camera_disconnected') return '입력 대기'
     if (summary?.analysis_stage === 'error') return '분석 오류'
     if (summary?.analysis_running) return '영상 분석 중'
-    return '분석 중지됨'
+    return '입력 대기'
   }, [connected, summary])
 
   if (!currentSite) {
@@ -437,7 +442,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             </button>
           </form>
           {notice && <p className="mt-3 text-sm text-red-300">{notice}</p>}
-          <button onClick={logout} className="mt-5 text-sm text-slate-500 hover:text-red-300">로그아웃</button>
+          <button onClick={endDemo} className="mt-5 text-sm text-slate-500 hover:text-red-300">데모 종료</button>
         </section>
       </main>
     )
@@ -451,7 +456,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             <div>
               <p className="mb-1 text-xs font-semibold tracking-[0.22em] text-cyan-400">SITE SAFETY OPERATIONS</p>
               <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">AI 안전관리 관제센터</h1>
-              <p className="mt-1 text-sm text-slate-400">{session.user.company_name} · 담당자 {session.user.manager_name}</p>
+              <p className="mt-1 text-sm text-slate-400">임시 클라이언트 세션 · 종료 시 모든 기록 삭제</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -487,9 +492,8 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
                 )
               )}
               <button onClick={() => setShowCamSettings((v) => !v)} className={`rounded-lg border px-3 py-2 text-sm transition ${showCamSettings ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-sky-500/50 hover:text-sky-300'}`}>카메라 설정</button>
-              <button onClick={onShowRanking} className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20">오늘 안전 순위</button>
               <button onClick={onShowRisk} className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-300 hover:bg-violet-500/20">위험 추세 분석</button>
-              <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">로그아웃</button>
+              <button onClick={endDemo} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-red-500/50 hover:text-red-300">데모 종료</button>
             </div>
           </div>
 
@@ -565,7 +569,31 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
           <MetricCard label="금일 위반" value={summary?.violations_today} unit="건" tone="violet" />
         </section>
 
-        <BrowserCameraController onStreamingChange={setCameraStreaming} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <BrowserCameraController
+            cameraId="camera-1"
+            title="카메라 A"
+            preferredDeviceIndex={0}
+            unavailableDeviceIds={[cameraDeviceIds['camera-2']].filter(Boolean)}
+            onDeviceSelectionChange={handleCameraDeviceSelection}
+            onStreamingChange={handleStreamingChange}
+          />
+          <BrowserCameraController
+            cameraId="camera-2"
+            title="카메라 B"
+            preferredDeviceIndex={1}
+            unavailableDeviceIds={[cameraDeviceIds['camera-1']].filter(Boolean)}
+            onDeviceSelectionChange={handleCameraDeviceSelection}
+            onStreamingChange={handleStreamingChange}
+          />
+        </div>
+
+        <BleSerialController
+          key={currentSite?.id}
+          tags={summary?.ble_tags ?? []}
+          workers={summary?.workers ?? []}
+          onRequestError={handleUnauthorized}
+        />
 
         {heatStatus && (
           <HeatSection
@@ -593,32 +621,73 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20">
-            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
               <div>
-                <h2 className="font-semibold text-white">현장 분석 영상</h2>
-                <p className="text-xs text-slate-500">{currentSite?.name} · 사람 추적 · 안전모 · 위험구역 판정</p>
+                <h2 className="font-semibold text-white">현장 분석 영상 · 카메라 2대</h2>
+                <p className="text-xs text-slate-500">{currentSite?.name} · 카메라 간 전역 ID · BLE 근접도 보정</p>
               </div>
-              {cameraStreaming
-                ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">LIVE</span>
-                : <span className="rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300">RECORDED</span>
-              }
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold text-slate-300">
+                  {summary?.camera_layout?.mode === 'overlap'
+                    ? '겹치는 구도'
+                    : summary?.camera_layout?.mode === 'separate'
+                      ? '분리된 구도'
+                      : '구도 학습 중'}
+                  {summary?.camera_layout?.confidence
+                    ? ' · ' + Math.round(summary.camera_layout.confidence * 100) + '%'
+                    : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetCameraCalibration}
+                  className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-semibold text-slate-400 hover:border-cyan-500 hover:text-cyan-300"
+                >
+                  배치 다시 학습
+                </button>
+                {anyCameraStreaming
+                  ? <span className="rounded-md bg-red-500/20 px-2.5 py-1 text-xs font-bold tracking-wider text-red-300">분석 중</span>
+                  : <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-bold tracking-wider text-slate-400">입력 대기</span>
+                }
+              </div>
             </div>
-            <ZoneEditor
-              key={currentSite?.id}
-              siteId={currentSite?.id}
-              streamKey={currentSite?.id}
-              streamSrc={`${API_BASE}/api/analysis/stream`}
-              streamAlt={`${currentSite?.name} AI 영상 분석`}
-              streamReady={streamReady}
-              waitingMessage={summary?.analysis_message ?? '영상 스트림을 기다리고 있습니다.'}
-              streamError={summary?.last_error}
-              onStreamLoad={() => setStreamReady(true)}
-              onStreamError={() => setStreamReady(false)}
-              onRequestError={handleUnauthorized}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
-              <span>프레임 #{summary?.frame_index ?? 0} · {cameraStreaming ? '브라우저 카메라 실시간 분석' : '녹화 영상 분석'}</span>
-              <span>단일 카메라 추적 · {summary?.processing_fps ?? 0} FPS</span>
+
+            <div className="grid gap-px bg-slate-800 xl:grid-cols-2">
+              {[
+                { cameraId: 'camera-1', label: '카메라 A' },
+                { cameraId: 'camera-2', label: '카메라 B' },
+              ].map(({ cameraId, label }) => {
+                const cameraSummary = summary?.cameras?.find((camera) => camera.camera_id === cameraId)
+                return (
+                  <div key={cameraId} className="bg-slate-900">
+                    <div className="flex items-center justify-between px-4 py-2 text-xs">
+                      <span className="font-semibold text-slate-300">{label}</span>
+                      <span className={cameraStreaming[cameraId] ? 'text-emerald-300' : 'text-slate-600'}>
+                        {cameraStreaming[cameraId] ? '연결됨' : '입력 대기'}
+                      </span>
+                    </div>
+                    <ZoneEditor
+                      key={(currentSite?.id ?? 'site') + '-' + cameraId}
+                      siteId={currentSite?.id}
+                      streamKey={(currentSite?.id ?? 'site') + '-' + cameraId}
+                      streamSrc={API_BASE + '/api/analysis/stream?camera_id=' + cameraId}
+                      streamAlt={(currentSite?.name ?? '') + ' ' + label + ' AI 영상 분석'}
+                      streamReady={streamReady[cameraId]}
+                      waitingMessage={cameraStreaming[cameraId]
+                        ? '첫 분석 프레임을 기다리고 있습니다.'
+                        : label + '를 설정하거나 녹화 영상을 업로드해 주세요.'}
+                      inputRequired={!cameraStreaming[cameraId]}
+                      streamError={cameraSummary?.last_error ?? summary?.last_error}
+                      onStreamLoad={() => handleStreamLoad(cameraId)}
+                      onStreamError={() => handleStreamError(cameraId)}
+                      onRequestError={handleUnauthorized}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
+                      <span>프레임 #{cameraSummary?.frame_index ?? 0}</span>
+                      <span>{cameraSummary?.worker_count ?? 0}명 · {cameraSummary?.processing_fps ?? 0} FPS</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -637,10 +706,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
                 <EmptyState text={
                   !connected ? '서버 연결 중...' :
                   !summary ? '분석 상태 불러오는 중...' :
-                  summary.analysis_stage === 'stopped' ? '분석이 시작되지 않았습니다.' :
+                  summary.analysis_stage === 'stopped' ? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.' :
                   summary.analysis_stage === 'loading' ? 'AI 모델 준비 중...' :
                   (summary.analysis_stage === 'waiting_camera' || summary.analysis_stage === 'waiting_frame') ? '카메라 연결을 기다리는 중...' :
-                  summary.analysis_stage === 'camera_disconnected' ? '카메라 연결이 종료되었습니다.' :
+                  summary.analysis_stage === 'camera_disconnected' ? '카메라를 설정하거나 녹화된 영상을 업로드해 주세요.' :
                   summary.analysis_stage === 'error' ? `분석 오류: ${summary.last_error ?? ''}` :
                   '현재 감지된 작업자가 없습니다.'
                 } />
@@ -661,7 +730,7 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-slate-950/50 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="px-5 py-3 font-medium">발생 시각</th>
+                  <th className="px-5 py-3 font-medium">발생 시각 (KST)</th>
                   <th className="px-5 py-3 font-medium">경고 유형</th>
                   <th className="px-5 py-3 font-medium">감지 ID</th>
                   <th className="px-5 py-3 font-medium">구역</th>
@@ -693,23 +762,10 @@ function Dashboard({ session, setSession, onShowRanking, onShowRisk }) {
   )
 }
 
-function Field({ label, ...props }) {
-  return (
-    <label className="block text-sm text-slate-300">
-      <span className="mb-1.5 block font-medium">{label}</span>
-      <input {...props} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/10" />
-    </label>
-  )
-}
-
-function AuthTab({ active, onClick, children }) {
-  return <button type="button" onClick={onClick} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${active ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>{children}</button>
-}
-
 function LoadingScreen() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#07111f] text-slate-300">
-      <div className="text-center"><div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" /><p>로그인 상태 확인 중...</p></div>
+      <div className="text-center"><div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" /><p>데모 세션 확인 중...</p></div>
     </main>
   )
 }
@@ -750,6 +806,11 @@ function WorkerCard({ worker }) {
       </div>
       <p className="mt-3 text-xs text-slate-400">위치 · {worker.zone}</p>
       <p className="mt-1 text-xs text-slate-400">객체 품질 · {Math.round((worker.image_quality ?? 0) * 100)}%</p>
+      {worker.ble_tag_key && (
+        <p className="mt-1 text-xs font-medium text-violet-300">
+          BLE 태그 · Minor {worker.ble_tag_key.split(':').at(-1)}
+        </p>
+      )}
       {worker.strong_rest_needed ? (
         <p className="mt-2 rounded-md bg-red-500/20 px-2 py-1.5 text-xs font-bold text-red-300">
           강력 휴식 권고 — 폭염구역 누적 20초 이상
@@ -948,4 +1009,14 @@ function HelmetPill({ state, violation }) {
 
 function EmptyState({ text }) {
   return <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">{text}</div>
+}
+
+function formatDate(value) {
+  if (!value) return '-'
+  const hasTimeZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+  const timestamp = hasTimeZone ? value : `${value}+09:00`
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(new Date(timestamp))
 }

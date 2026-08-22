@@ -3,14 +3,15 @@
 import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import DocumentChunk, KnowledgeDocument
-from app.services.rag.embedding import MockEmbeddingProvider
-from app.services.rag.indexer import DocumentIndexer, EmbeddingGenerationError, chunk_text
+from app.services.rag.embedding import MockEmbeddingProvider, OpenAIEmbeddingProvider
+from app.services.rag.indexer import DocumentIndexer, chunk_text
 from app.services.rag.retriever import KnowledgeRetriever
 
 
@@ -29,6 +30,50 @@ def _make_db():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     return Session
+
+
+class FakeEmbeddingsAPI:
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        data = [
+            SimpleNamespace(index=index, embedding=[float(index + 1)] * kwargs["dimensions"])
+            for index, _text in enumerate(kwargs["input"])
+        ]
+        return SimpleNamespace(data=list(reversed(data)))
+
+
+class TestOpenAIEmbeddingProvider(unittest.TestCase):
+    def test_batches_requests_and_preserves_input_order(self):
+        embeddings_api = FakeEmbeddingsAPI()
+        client = SimpleNamespace(embeddings=embeddings_api)
+        provider = OpenAIEmbeddingProvider(
+            model_name="text-embedding-3-small",
+            dimension=3,
+            batch_size=2,
+            client=client,
+        )
+
+        vectors = provider.encode(["첫째", "둘째", "셋째"])
+
+        self.assertEqual(len(embeddings_api.calls), 2)
+        self.assertEqual(vectors, [[1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [1.0, 1.0, 1.0]])
+        for call in embeddings_api.calls:
+            self.assertEqual(call["model"], "text-embedding-3-small")
+            self.assertEqual(call["dimensions"], 3)
+            self.assertEqual(call["encoding_format"], "float")
+
+    def test_missing_api_key_fails_before_request(self):
+        provider = OpenAIEmbeddingProvider(api_key="")
+        with self.assertRaisesRegex(RuntimeError, "OPENAI_API_KEY"):
+            provider.encode(["안전 지침"])
+
+    def test_rejects_empty_input_text(self):
+        provider = OpenAIEmbeddingProvider(client=SimpleNamespace())
+        with self.assertRaises(ValueError):
+            provider.encode([""])
 
 
 class TestChunking(unittest.TestCase):
@@ -85,6 +130,22 @@ class TestDocumentIndexer(unittest.TestCase):
             self.assertEqual(doc.title, "안전 수칙")
             chunks = db.query(DocumentChunk).filter_by(document_id=doc_id).all()
             self.assertGreater(len(chunks), 0)
+
+    def test_embedding_failure_does_not_persist_unusable_document(self):
+        with patch.object(self.provider, "encode", side_effect=RuntimeError("model error")):
+            with self.assertRaisesRegex(ValueError, "임베딩 생성에 실패"):
+                self.indexer.index_document(
+                    1,
+                    "실패 문서",
+                    "test",
+                    "1.0",
+                    "안전 지침".encode("utf-8"),
+                    "failed.txt",
+                )
+
+        with self.session_factory() as db:
+            count = db.query(KnowledgeDocument).filter_by(title="실패 문서").count()
+            self.assertEqual(count, 0)
 
     def test_duplicate_version_replaced(self):
         content = "안전 지침 v1".encode("utf-8")
@@ -151,6 +212,7 @@ class TestKnowledgeRetrieverFallback(unittest.TestCase):
             chunk_size=200,
         )
 
+    @patch("app.config.DATABASE_URL", "postgresql+psycopg://supabase.example/postgres")
     def test_sqlite_search_returns_results(self):
         self.indexer.index_document(
             1, "안전 매뉴얼", "test", "1.0",

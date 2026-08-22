@@ -38,6 +38,34 @@ export function cameraUploadUrl(cameraId) {
   return `${wsOrigin}/ws/camera-upload/${cameraId}`
 }
 
+export function apiErrorMessage(detail) {
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => {
+      if (typeof item === 'string') return item
+      if (!item || typeof item !== 'object') return String(item)
+      const location = Array.isArray(item.loc)
+        ? item.loc.filter((part) => part !== 'body').join('.')
+        : ''
+      const message = typeof item.msg === 'string'
+        ? item.msg.replace(/^Value error,\s*/, '')
+        : JSON.stringify(item)
+      return location ? `${location}: ${message}` : message
+    }).filter(Boolean)
+    if (messages.length) return messages.join(' / ')
+  }
+  if (detail && typeof detail === 'object') {
+    if (typeof detail.message === 'string') return detail.message
+    if (typeof detail.msg === 'string') return detail.msg
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      return '요청을 처리하지 못했습니다.'
+    }
+  }
+  return '요청을 처리하지 못했습니다.'
+}
+
 export async function api(path, options = {}) {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE}${path}`, {
@@ -52,11 +80,43 @@ export async function api(path, options = {}) {
   if (response.status === 204) return null
   const data = await response.json().catch(() => null)
   if (!response.ok) {
-    const error = new Error(data?.detail || '요청을 처리하지 못했습니다.')
+    const error = new Error(apiErrorMessage(data?.detail))
     error.status = response.status
     throw error
   }
   return data
+}
+
+export function submitBleObservation(observation) {
+  return api('/api/ble/observations', {
+    method: 'POST',
+    body: JSON.stringify(observation),
+  })
+}
+
+export function bindBleTag(tagKey, trackId) {
+  return api('/api/ble/bindings', {
+    method: 'POST',
+    body: JSON.stringify({ tag_key: tagKey, track_id: trackId }),
+  })
+}
+
+export function unbindBleTag(tagKey) {
+  return api('/api/ble/bindings/remove', {
+    method: 'POST',
+    body: JSON.stringify({ tag_key: tagKey }),
+  })
+}
+
+
+export function mergePersonIds(primaryTrackId, duplicateTrackId) {
+  return api('/api/ble/identities/merge', {
+    method: 'POST',
+    body: JSON.stringify({
+      primary_track_id: primaryTrackId,
+      duplicate_track_id: duplicateTrackId,
+    }),
+  })
 }
 
 // ── Risk API ──────────────────────────────────────────────────────────────────

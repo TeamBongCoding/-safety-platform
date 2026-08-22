@@ -8,6 +8,7 @@ from ..database import get_db
 from ..auth import require_current_site
 from ..models import Event, EventEpisode, Site
 from ..schemas import EpisodeOut, EpisodeResolveRequest, EventOut
+from ..time_utils import utc_now
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -98,7 +99,7 @@ def resolve_episode(
         raise HTTPException(status_code=404, detail="에피소드를 찾을 수 없습니다.")
     ep.resolved = True
     ep.resolution_note = payload.note
-    ep.updated_at = datetime.now()
+    ep.updated_at = utc_now()
     db.commit()
     db.refresh(ep)
     return ep

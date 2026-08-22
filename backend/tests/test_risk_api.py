@@ -3,7 +3,7 @@
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -19,18 +19,9 @@ from app.config import (
 )
 from app.database import Base, get_db
 from app.main import app
-from app.models import (
-    DocumentChunk,
-    EventEpisode,
-    KnowledgeDocument,
-    LoginSession,
-    Site,
-    User,
-)
-from app.auth import hash_password, _token_hash
-from app.services.rag.indexer import EmbeddingGenerationError
-from app.routers.risk import rag_query_for_event
-from app.time_utils import utc_stored_isoformat
+from app.models import EventEpisode, LoginSession, Site, User
+from app.routers.risk import _build_rag_query, _diversify_chunks, _select_rag_chunks
+from app.auth import _token_hash
 
 
 def _make_engine():
@@ -46,9 +37,12 @@ def _make_engine():
 def _setup_user(db, email, password, site_name="테스트현장"):
     user = User(
         email=email,
-        password_hash=hash_password(password),
+        password_hash="unused",
         company_name="테스트",
         manager_name="테스터",
+        is_ephemeral=True,
+        last_seen_at=datetime.now(),
+        expires_at=datetime.now() + timedelta(hours=2),
     )
     db.add(user)
     db.flush()
@@ -71,6 +65,52 @@ def _make_session_cookie(db, user, days=7):
     db.add(session)
     db.commit()
     return token
+
+
+class TestRagReportHelpers(unittest.TestCase):
+    def test_korean_query_expands_event_and_response_terms(self):
+        query = _build_rag_query(
+            "no_helmet",
+            {"factors": [{"description": "최근 안전모 미착용 증가"}]},
+        )
+        self.assertIn("안전모 미착용", query)
+        self.assertIn("관리감독자 교육", query)
+        self.assertIn("작업중지", query)
+
+    def test_chunk_selection_prefers_different_documents(self):
+        chunks = [
+            SimpleNamespace(document_id=1, name="1-a"),
+            SimpleNamespace(document_id=1, name="1-b"),
+            SimpleNamespace(document_id=1, name="1-c"),
+            SimpleNamespace(document_id=2, name="2-a"),
+            SimpleNamespace(document_id=2, name="2-b"),
+            SimpleNamespace(document_id=3, name="3-a"),
+        ]
+        selected = _diversify_chunks(chunks, limit=4)
+        self.assertEqual([chunk.document_id for chunk in selected], [1, 2, 3, 1])
+
+    def test_rag_selection_uses_best_match_when_normal_threshold_is_empty(self):
+        chunks = [
+            SimpleNamespace(document_id=1, similarity=0.52),
+            SimpleNamespace(document_id=2, similarity=0.48),
+        ]
+        selected = _select_rag_chunks(
+            chunks,
+            limit=5,
+            threshold=0.55,
+            fallback_threshold=0.35,
+        )
+        self.assertEqual(selected, [chunks[0]])
+
+    def test_rag_selection_rejects_weak_fallback(self):
+        chunks = [SimpleNamespace(document_id=1, similarity=0.2)]
+        selected = _select_rag_chunks(
+            chunks,
+            limit=5,
+            threshold=0.55,
+            fallback_threshold=0.35,
+        )
+        self.assertEqual(selected, [])
 
 
 class TestRiskAPIAuth(unittest.TestCase):

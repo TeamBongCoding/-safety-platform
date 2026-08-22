@@ -12,8 +12,6 @@ dist/
 # 대용량 (드라이브로 공유)
 *.pt
 *.pth
-data/videos/*.mp4
-data/videos/*.mov
 backend/output*.mp4
 evaluation/videos/*
 !evaluation/videos/.gitkeep

@@ -1,6 +1,7 @@
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import logging
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,23 +10,47 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .auth import user_from_token
-from .config import CORS_ORIGINS, KMA_API_KEY, PROJECT_ROOT, SESSION_COOKIE_NAME
+from .config import (
+    CORS_ORIGINS,
+    DEMO_CLEANUP_INTERVAL_SECONDS,
+    KMA_API_KEY,
+    PROJECT_ROOT,
+    SESSION_COOKIE_NAME,
+)
 from .database import Base, SessionLocal, engine
 from .migrations import migrate_legacy_schema
 from .models import Site
-from .routers import admin, analysis, auth, events, heat, knowledge, rankings, risk, sites, zones
+from .routers import analysis, auth, ble, events, heat, knowledge, risk, sites, zones
 from .services.analysis_service import analysis_registry
 from .services.heat_service import heat_registry
+from .services.demo_accounts import count_active_demo_users, purge_expired_demo_users
+
+logger = logging.getLogger(__name__)
 
 migrate_legacy_schema(engine)
 Base.metadata.create_all(bind=engine)
 
 
+async def _demo_cleanup_loop():
+    while True:
+        try:
+            await asyncio.to_thread(purge_expired_demo_users)
+        except Exception:
+            logger.exception("Demo cleanup cycle failed")
+        await asyncio.sleep(DEMO_CLEANUP_INTERVAL_SECONDS)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    analysis_registry.stop_all()
-    heat_registry.stop_all()
+    await asyncio.to_thread(purge_expired_demo_users)
+    cleanup_task = asyncio.create_task(_demo_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        analysis_registry.stop_all()
+        heat_registry.stop_all()
 
 
 app = FastAPI(title="AI 안전관리 플랫폼", lifespan=lifespan)
@@ -89,12 +114,11 @@ async def enforce_external_https_and_security_headers(request: Request, call_nex
     return _add_security_headers(response, is_https=is_https)
 
 app.include_router(auth.router)
-app.include_router(admin.router)
 app.include_router(sites.router)
 app.include_router(events.router)
-app.include_router(rankings.router)
 app.include_router(zones.router)
 app.include_router(analysis.router)
+app.include_router(ble.router)
 app.include_router(heat.router)
 app.include_router(risk.router)
 app.include_router(knowledge.router)
@@ -108,17 +132,21 @@ def health():
         "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
         "llm_enabled": OPENAI_ENABLED,
         "llm_provider": "openai" if OPENAI_ENABLED else None,
+        "active_demo_sessions": count_active_demo_users(),
     }
 
 
-@app.websocket("/ws/camera-upload")
-async def ws_camera_upload(ws: WebSocket):
-    """브라우저에서 캡처한 JPEG 프레임을 수신하여 영상 분석 서비스에 주입합니다."""
+async def _camera_upload_session(ws: WebSocket, camera_id: str):
+    """Receive one browser camera stream without stopping the other stream."""
+    if camera_id not in {"camera-1", "camera-2"}:
+        await ws.close(code=4404, reason="지원하지 않는 카메라 ID입니다.")
+        return
+
     session_token = ws.cookies.get(SESSION_COOKIE_NAME)
     with SessionLocal() as db:
         user = user_from_token(session_token, db)
         if not user:
-            await ws.close(code=4401, reason="로그인이 필요합니다.")
+            await ws.close(code=4401, reason="데모 세션이 필요합니다.")
             return
         site = db.scalar(
             select(Site).where(
@@ -135,13 +163,16 @@ async def ws_camera_upload(ws: WebSocket):
         site_lon = site.longitude
 
     heat_svc = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
-    # 기존 파일 기반 서비스를 중지하고 외부 카메라 서비스로 전환
-    analysis_registry.stop_site(site_id)
-    service = analysis_registry.get(site_id, source="browser", is_outdoor=is_outdoor, heat_service=heat_svc)
+    service = analysis_registry.get(
+        site_id,
+        source="browser",
+        is_outdoor=is_outdoor,
+        heat_service=heat_svc,
+    )
 
     await ws.accept()
-    if not service.attach_external_camera():
-        await ws.close(code=4409, reason="이미 다른 카메라가 연결되어 있습니다.")
+    if not service.attach_external_camera(camera_id):
+        await ws.close(code=4409, reason=f"{camera_id}가 이미 연결되어 있습니다.")
         return
 
     last_auth_check = time.monotonic()
@@ -159,23 +190,25 @@ async def ws_camera_upload(ws: WebSocket):
                         await ws.close(code=4401, reason="세션 또는 현재 현장이 변경되었습니다.")
                         return
                 last_auth_check = now
-            service.submit_jpeg(data)
+            service.submit_jpeg(data, camera_id)
+            await ws.send_json({
+                "type": "frame_ack",
+                "camera_id": camera_id,
+            })
     except WebSocketDisconnect:
         pass
     finally:
-        service.detach_external_camera()
-        analysis_registry.stop_site(site_id)
-        # 현장이 여전히 존재하고 현재 선택된 경우에만 파일 기반 분석으로 복귀한다.
-        with SessionLocal() as db:
-            current_user = user_from_token(session_token, db)
-            site_still_active = bool(
-                current_user
-                and current_user.current_site_id == site_id
-                and db.scalar(select(Site.id).where(Site.id == site_id))
-            )
-        if site_still_active:
-            heat_svc2 = heat_registry.get(site_id, site_lat, site_lon, KMA_API_KEY)
-            analysis_registry.get(site_id, is_outdoor=is_outdoor, heat_service=heat_svc2)
+        service.detach_external_camera(camera_id)
+
+
+@app.websocket("/ws/camera-upload")
+async def ws_camera_upload_legacy(ws: WebSocket):
+    await _camera_upload_session(ws, "camera-1")
+
+
+@app.websocket("/ws/camera-upload/{camera_id}")
+async def ws_camera_upload(ws: WebSocket, camera_id: str):
+    await _camera_upload_session(ws, camera_id)
 
 
 @app.websocket("/ws")
@@ -184,10 +217,7 @@ async def ws_endpoint(ws: WebSocket):
     with SessionLocal() as db:
         user = user_from_token(session_token, db)
         if not user:
-            await ws.close(code=4401, reason="로그인이 필요합니다.")
-            return
-        if user.role == "platform_admin":
-            await ws.close(code=4403, reason="서버 관리자 계정은 영상 분석을 사용하지 않습니다.")
+            await ws.close(code=4401, reason="데모 세션이 필요합니다.")
             return
         site = db.scalar(
             select(Site).where(

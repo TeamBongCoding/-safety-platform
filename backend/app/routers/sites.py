@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from ..auth import require_current_site, require_user
+from ..auth import require_user
 from ..database import get_db
-from ..models import Event, Site, User, Zone
+from ..models import Site, User
 from ..schemas import SessionOut, SiteCreate, SitePatch, SiteOut
 from ..services.analysis_service import analysis_registry
+from ..services.demo_accounts import purge_demo_site
 from ..services.heat_service import heat_registry
 from .auth import session_payload
 
@@ -76,28 +77,23 @@ def delete_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    site = db.scalar(select(Site).where(Site.id == site_id, Site.user_id == user.id))
-    if not site:
+    user_id = user.id
+    if not db.scalar(select(Site.id).where(Site.id == site_id, Site.user_id == user_id)):
         raise HTTPException(status_code=404, detail="현장을 찾을 수 없습니다.")
-
-    all_sites = db.scalars(select(Site).where(Site.user_id == user.id)).all()
-    analysis_registry.stop_site(site_id)
-    heat_registry.stop_site(site_id)
-
-    # 관련 데이터 삭제
-    db.query(Event).filter(Event.site_id == site_id).delete()
-    db.query(Zone).filter(Zone.site_id == site_id).delete()
-    # 삭제한 현장이 현재 현장이면 먼저 FK를 비우거나 다른 현장으로 전환한다.
-    if user.current_site_id == site_id:
-        next_site = next((s for s in all_sites if s.id != site_id), None)
-        user.current_site_id = next_site.id if next_site else None
-        db.flush()
-
-    db.delete(site)
-
-    db.commit()
-    db.refresh(user)
-    return session_payload(user, db)
+    make_session = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+    db.rollback()
+    try:
+        deleted = purge_demo_site(user_id, site_id, session_factory=make_session)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="업로드 자료 삭제를 확인하지 못해 현장을 보존했습니다. 잠시 후 다시 시도하세요.",
+        ) from exc
+    if not deleted:
+        raise HTTPException(status_code=409, detail="현장을 삭제할 수 없습니다.")
+    db.expire_all()
+    refreshed_user = db.get(User, user_id)
+    return session_payload(refreshed_user, db)
 
 
 @router.post("/{site_id}/select", response_model=SessionOut)

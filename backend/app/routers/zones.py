@@ -126,11 +126,15 @@ def delete_zone(
     db: Session = Depends(get_db),
 ):
     zone = require_site_zone(zone_id, site, db)
+
+    # 과거 사건·예측 기록은 보존하되, 삭제할 구역과의 연결만 해제한다.
+    # PostgreSQL은 이 참조가 남아 있으면 외래키 제약으로 Zone 삭제를 거부한다.
     for model in (Event, EventEpisode, RiskPrediction):
         db.execute(
             update(model)
             .where(model.zone_id == zone.id)
             .values(zone_id=None)
         )
+
     db.delete(zone)
     db.commit()
