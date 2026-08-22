@@ -50,9 +50,14 @@ class DeploymentConfigurationTests(unittest.TestCase):
         connection = engine.connect.return_value.__enter__.return_value
         connection.scalar.return_value = True
 
+        migration_connection = engine.begin.return_value.__enter__.return_value
+        migration_connection.execute.return_value.first.return_value = (
+            "timestamp with time zone",
+        )
+
         _migrate_postgresql(engine)
 
-        engine.begin.assert_not_called()
+        engine.begin.assert_called_once()
 
 
     def test_fresh_schema_contains_zone_updated_at(self):

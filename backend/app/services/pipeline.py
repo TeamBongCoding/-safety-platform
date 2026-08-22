@@ -38,7 +38,7 @@ def process_frame(
     if detections_fresh or not hasattr(tracker, "predict"):
         tracks = tracker.update(frame, persons, w, h, timestamp=now)
     else:
-        tracks = tracker.predict(timestamp=now)
+        tracks = tracker.predict(timestamp=now, width=w, height=h)
     if identity_resolver is not None:
         tracks = identity_resolver(tracks, now)
 

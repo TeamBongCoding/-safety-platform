@@ -116,6 +116,7 @@ export default function ZoneEditor({
   const dragRef = useRef(null)
   const recordingSessionRef = useRef(null)
   const savedRecordingsRef = useRef([])
+  const streamCallbacksRef = useRef({ onStreamLoad, onStreamError })
   const visibilityKey = `safety_zone_overlay_${siteId}`
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
@@ -128,6 +129,7 @@ export default function ZoneEditor({
     }
   })
   const [displayRect, setDisplayRect] = useState(null)
+  const [sourceAspectRatio, setSourceAspectRatio] = useState(4 / 3)
   const [editorOpen, setEditorOpen] = useState(false)
   const [phase, setPhase] = useState('idle')
   const [tool, setTool] = useState('vertices')
@@ -140,6 +142,10 @@ export default function ZoneEditor({
   const [recording, setRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [savedRecordings, setSavedRecordings] = useState([])
+
+  useEffect(() => {
+    streamCallbacksRef.current = { onStreamLoad, onStreamError }
+  }, [onStreamLoad, onStreamError])
 
   const zonesUrl = '/api/zones'
 
@@ -225,14 +231,14 @@ export default function ZoneEditor({
           if (!gotFirstFrame) {
             gotFirstFrame = true
             updateDisplayRect()
-            onStreamLoad?.()
+            streamCallbacksRef.current.onStreamLoad?.()
           }
           const old = prevBlob
           prevBlob = objectUrl
           setTimeout(() => revoke(old), 250)
         } else if (resp.status === 401 || resp.status === 403) {
           active = false
-          onStreamError?.()
+          streamCallbacksRef.current.onStreamError?.()
           return
         } else {
           retryDelay = 100
@@ -248,7 +254,7 @@ export default function ZoneEditor({
       active = false
       setTimeout(() => revoke(prevBlob), 250)
     }
-  }, [streamSrc, inputRequired, onStreamError, onStreamLoad, updateDisplayRect])
+  }, [streamSrc, inputRequired, updateDisplayRect])
 
   useEffect(() => {
     if (!recording) return undefined
@@ -502,8 +508,12 @@ export default function ZoneEditor({
   }
 
   const handleImageLoad = () => {
+    const image = imageRef.current
+    if (image?.naturalWidth && image?.naturalHeight) {
+      setSourceAspectRatio(image.naturalWidth / image.naturalHeight)
+    }
     updateDisplayRect()
-    onStreamLoad()
+    streamCallbacksRef.current.onStreamLoad?.()
   }
 
   const setGlobalVisibility = () => {
@@ -758,7 +768,11 @@ export default function ZoneEditor({
         </div>
       )}
 
-      <div ref={containerRef} className="relative aspect-video overflow-hidden bg-black">
+      <div
+        ref={containerRef}
+        className="relative w-full overflow-hidden bg-black"
+        style={{ aspectRatio: sourceAspectRatio }}
+      >
         <img
           ref={imageRef}
           key={streamKey}

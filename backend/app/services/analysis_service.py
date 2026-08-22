@@ -914,6 +914,7 @@ class AnalysisService:
                         "frame_index": frame_index,
                         "detections_fresh": (
                             frame_index % max(1, LIVE_INFER_EVERY) == 0
+                            or state["tracker"].needs_dense_inference(timestamp=now)
                         ),
                     })
 

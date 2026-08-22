@@ -16,6 +16,9 @@ from ultralytics.trackers.bot_sort import BOTSORT
 from ..config import (
     REID_GALLERY_SECONDS,
     REID_MATCH_THRESHOLD,
+    REID_FRAME_GAP_SECONDS,
+    REID_SWITCH_CONFIRM_FRAMES,
+    REID_SWITCH_MARGIN,
     TRACK_BUFFER_FRAMES,
 )
 from .reid_encoder import reid_encoder
@@ -50,6 +53,13 @@ def _center(box: list[float]) -> np.ndarray:
         [(box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0],
         dtype=np.float32,
     )
+
+
+def _boxes_are_close(left: list[float], right: list[float]) -> bool:
+    distance = float(np.linalg.norm(_center(left) - _center(right)))
+    left_scale = np.sqrt(max(1.0, (left[2] - left[0]) * (left[3] - left[1])))
+    right_scale = np.sqrt(max(1.0, (right[2] - right[0]) * (right[3] - right[1])))
+    return distance <= 1.15 * float((left_scale + right_scale) / 2.0)
 
 
 def appearance_embedding(frame: np.ndarray, box: list[float]) -> tuple[np.ndarray, float]:
@@ -131,6 +141,8 @@ class LocalTrack:
     age_frames: int = 1
     ble_tag_key: str | None = None
     last_seen_at: float = field(default_factory=time.monotonic)
+    motion_box: list[float] | None = field(default=None, repr=False)
+    motion_seen_at: float | None = field(default=None, repr=False)
     velocity: np.ndarray = field(
         default_factory=lambda: np.zeros(4, dtype=np.float32),
         repr=False,
@@ -143,6 +155,10 @@ class LocalTrack:
     def __post_init__(self) -> None:
         if not self.embedding_gallery and self.embedding.size:
             self.embedding_gallery.append(self.embedding.copy())
+        if self.motion_box is None:
+            self.motion_box = list(self.box)
+        if self.motion_seen_at is None:
+            self.motion_seen_at = self.last_seen_at
 
     @property
     def shade_status(self) -> str:
@@ -164,21 +180,32 @@ class LocalTrack:
         self._shade_history = [item for item in self._shade_history if now - item[0] <= 10.0]
 
     def predicted_box(self, now: float) -> list[float]:
-        elapsed = min(2.0, max(0.0, now - self.last_seen_at))
-        predicted = np.asarray(self.box, dtype=np.float32) + self.velocity * elapsed
+        anchor_box = self.motion_box or self.box
+        anchor_time = self.motion_seen_at if self.motion_seen_at is not None else self.last_seen_at
+        elapsed = min(2.0, max(0.0, now - anchor_time))
+        predicted = np.asarray(anchor_box, dtype=np.float32) + self.velocity * elapsed
         return predicted.tolist()
 
     def update_motion(self, box: list[float], now: float) -> None:
-        elapsed = now - self.last_seen_at
+        previous_box = self.motion_box or self.box
+        previous_time = self.motion_seen_at if self.motion_seen_at is not None else self.last_seen_at
+        elapsed = now - previous_time
         if elapsed >= 0.02:
             measured = (
-                np.asarray(box, dtype=np.float32) - np.asarray(self.box, dtype=np.float32)
+                np.asarray(box, dtype=np.float32) - np.asarray(previous_box, dtype=np.float32)
             ) / elapsed
             measured = np.clip(measured, -2000.0, 2000.0)
             if np.any(self.velocity):
                 self.velocity = self.velocity * 0.65 + measured * 0.35
             else:
                 self.velocity = measured
+        self.box = box
+        self.last_seen_at = now
+        self.motion_box = list(box)
+        self.motion_seen_at = now
+
+    def update_uncertain_observation(self, box: list[float], now: float) -> None:
+        """Update display freshness without learning possibly swapped motion."""
         self.box = box
         self.last_seen_at = now
 
@@ -188,8 +215,11 @@ class LocalTrack:
             (_cosine_similarity(saved, embedding) for saved in gallery),
             reverse=True,
         )
-        strongest = scores[: min(3, len(scores))]
-        return float(sum(strongest) / len(strongest)) if strongest else 0.0
+        if not scores:
+            return 0.0
+        if len(scores) == 1:
+            return float(scores[0])
+        return float(0.75 * scores[0] + 0.25 * scores[1])
 
     def update_embedding(
         self,
@@ -208,9 +238,14 @@ class LocalTrack:
             mixed = self.embedding * 0.8 + embedding * 0.2
             norm = float(np.linalg.norm(mixed))
             self.embedding = mixed / norm if norm > 1e-8 else mixed
-            if quality >= 0.45:
-                self.embedding_gallery.append(embedding.copy())
-                self.embedding_gallery = self.embedding_gallery[-self.MAX_GALLERY_SIZE:]
+            if quality >= 0.52:
+                nearest = max(
+                    (_cosine_similarity(saved, embedding) for saved in self.embedding_gallery),
+                    default=0.0,
+                )
+                if nearest < 0.995:
+                    self.embedding_gallery.append(embedding.copy())
+                    self.embedding_gallery = self.embedding_gallery[-self.MAX_GALLERY_SIZE:]
         self.quality = max(self.quality * 0.98, quality)
 
 
@@ -300,10 +335,18 @@ class CameraPersonTracker:
         self._identities: dict[int, LocalTrack] = {}
         self._bot_to_local: dict[int, int] = {}
         self._active_ble_tags: set[str] = set()
+        self._pending_remaps: dict[int, tuple[int, int]] = {}
+        self._appearance_focus_until = 0.0
+        self._last_detection_at: float | None = None
 
     OVERLAP_FREEZE_IOU = 0.18
     GLOBAL_MATCH_THRESHOLD = 0.42
     MIN_APPEARANCE_GATE = 0.45
+    SAME_BOT_MIN_APPEARANCE = 0.20
+    CLEAR_SWITCH_APPEARANCE = 0.88
+    CLEAR_SWITCH_MARGIN = 0.25
+    APPEARANCE_FOCUS_SECONDS = 2.0
+    CLEAN_OBSERVATION_QUALITY = 0.50
     STALE_OUTPUT_SECONDS = 1.0
 
     @staticmethod
@@ -356,16 +399,26 @@ class CameraPersonTracker:
         now: float,
         width: int,
         height: int,
-    ) -> dict[int, int]:
+        overlapping: set[int] | None = None,
+    ) -> tuple[dict[int, int], set[int]]:
+        overlapping = overlapping or set()
         candidates = [
             track for track in self._identities.values()
-            if now - track.last_seen_at <= REID_GALLERY_SECONDS
+            if (
+                now - track.last_seen_at <= REID_GALLERY_SECONDS
+                or (
+                    track.ble_tag_key is not None
+                    and track.ble_tag_key in self._active_ble_tags
+                )
+            )
         ]
         if not candidates or not observations:
-            return {}
+            return {}, set(overlapping)
 
         frame_diagonal = max(1.0, float(np.hypot(width, height)))
         scores = np.full((len(candidates), len(observations)), -1.0, dtype=np.float32)
+        appearance_scores = np.zeros_like(scores)
+        appearance_focus = bool(overlapping) or now <= self._appearance_focus_until
         active_bound = [
             track for track in candidates
             if track.ble_tag_key and track.ble_tag_key in self._active_ble_tags
@@ -382,57 +435,200 @@ class CameraPersonTracker:
                 )
                 same_bot = self._bot_to_local.get(observation["bot_id"]) == track.local_track_id
                 recently_seen = now - track.last_seen_at <= 1.5
+                appearance_scores[candidate_index, observation_index] = appearance
 
-                score = (
-                    0.55 * appearance
-                    + 0.28 * motion
-                    + 0.12 * overlap
-                    + (0.05 if same_bot else 0.0)
-                )
+                if appearance_focus:
+                    # Crossing or dropped frames: trust appearance, not stale position.
+                    score = (
+                        0.86 * appearance
+                        + 0.06 * motion
+                        + 0.03 * overlap
+                        + (0.05 if same_bot else 0.0)
+                    )
+                else:
+                    score = (
+                        0.65 * appearance
+                        + 0.25 * motion
+                        + 0.05 * overlap
+                        + (0.05 if same_bot else 0.0)
+                    )
+
                 if track.ble_tag_key in self._active_ble_tags:
-                    score += 0.02
+                    score += 0.03
                     if len(active_bound) == 1 and appearance >= 0.35:
-                        score += 0.06
+                        score += 0.07
 
                 allowed = (
-                    same_bot
+                    (same_bot and appearance >= self.SAME_BOT_MIN_APPEARANCE)
                     or appearance >= self.MIN_APPEARANCE_GATE
-                    or (recently_seen and (motion >= 0.18 or overlap >= 0.03))
+                    or (
+                        recently_seen
+                        and appearance >= 0.30
+                        and (motion >= 0.18 or overlap >= 0.03)
+                    )
                 )
                 if allowed:
                     scores[candidate_index, observation_index] = score
 
         row_indexes, column_indexes = linear_sum_assignment(-scores)
-        assigned: dict[int, int] = {}
+        proposed: dict[int, int] = {}
         for row_index, column_index in zip(row_indexes, column_indexes):
             score = float(scores[row_index, column_index])
             if score < self.GLOBAL_MATCH_THRESHOLD:
                 continue
             candidate = candidates[row_index]
             observation = observations[column_index]
-            appearance = candidate.appearance_similarity(observation["embedding"])
+            appearance = float(appearance_scores[row_index, column_index])
             same_bot = self._bot_to_local.get(observation["bot_id"]) == candidate.local_track_id
             if now - candidate.last_seen_at > 1.5 and not same_bot:
                 if appearance < REID_MATCH_THRESHOLD:
                     continue
-            assigned[column_index] = candidate.local_track_id
-        return assigned
+            proposed[column_index] = candidate.local_track_id
+
+        assigned = dict(proposed)
+        uncertain = set(overlapping)
+        candidate_by_id = {track.local_track_id: track for track in candidates}
+
+        for observation_index, observation in enumerate(observations):
+            bot_id = observation["bot_id"]
+            previous_id = self._bot_to_local.get(bot_id)
+            proposed_id = proposed.get(observation_index)
+            previous = candidate_by_id.get(previous_id)
+            proposed_track = candidate_by_id.get(proposed_id)
+
+            if observation_index in overlapping and previous is not None:
+                assigned[observation_index] = previous_id
+                uncertain.add(observation_index)
+                self._pending_remaps.pop(bot_id, None)
+                continue
+
+            if previous is None:
+                continue
+            if proposed_track is None:
+                previous_appearance = previous.appearance_similarity(observation["embedding"])
+                if previous_appearance >= self.SAME_BOT_MIN_APPEARANCE:
+                    assigned[observation_index] = previous_id
+                    uncertain.add(observation_index)
+                self._pending_remaps.pop(bot_id, None)
+                continue
+            if proposed_id == previous_id:
+                self._pending_remaps.pop(bot_id, None)
+                continue
+
+            proposed_appearance = proposed_track.appearance_similarity(observation["embedding"])
+            previous_appearance = previous.appearance_similarity(observation["embedding"])
+            ranked = sorted(
+                (float(appearance_scores[index, observation_index]) for index in range(len(candidates))),
+                reverse=True,
+            )
+            best_margin = ranked[0] - ranked[1] if len(ranked) > 1 else ranked[0]
+            advantage = proposed_appearance - previous_appearance
+            strong_enough = (
+                proposed_appearance >= REID_MATCH_THRESHOLD
+                and advantage >= REID_SWITCH_MARGIN
+                and best_margin >= REID_SWITCH_MARGIN
+            )
+            clearly_different = (
+                proposed_appearance >= self.CLEAR_SWITCH_APPEARANCE
+                and advantage >= self.CLEAR_SWITCH_MARGIN
+            )
+
+            if not strong_enough:
+                assigned[observation_index] = previous_id
+                uncertain.add(observation_index)
+                self._pending_remaps.pop(bot_id, None)
+                continue
+            if clearly_different:
+                self._pending_remaps.pop(bot_id, None)
+                continue
+
+            pending_target, pending_count = self._pending_remaps.get(bot_id, (proposed_id, 0))
+            if pending_target != proposed_id:
+                pending_count = 0
+            if observation["quality"] >= self.CLEAN_OBSERVATION_QUALITY:
+                pending_count += 1
+            self._pending_remaps[bot_id] = (proposed_id, pending_count)
+            if pending_count < max(1, REID_SWITCH_CONFIRM_FRAMES):
+                assigned[observation_index] = previous_id
+                uncertain.add(observation_index)
+            else:
+                self._pending_remaps.pop(bot_id, None)
+
+        # Post-processing can retain a previous mapping. Guard against assigning
+        # one identity to two boxes; the less established box receives a new ID.
+        owners: dict[int, int] = {}
+        for observation_index in list(assigned):
+            local_id = assigned[observation_index]
+            other_index = owners.get(local_id)
+            if other_index is None:
+                owners[local_id] = observation_index
+                continue
+            current_bot = observations[observation_index]["bot_id"]
+            other_bot = observations[other_index]["bot_id"]
+            current_owned = self._bot_to_local.get(current_bot) == local_id
+            other_owned = self._bot_to_local.get(other_bot) == local_id
+            loser = other_index if current_owned and not other_owned else observation_index
+            assigned.pop(loser, None)
+            uncertain.add(loser)
+            if loser == other_index:
+                owners[local_id] = observation_index
+
+        return assigned, uncertain
+
+    def needs_dense_inference(self, *, timestamp: float | None = None) -> bool:
+        """Use every frame near crossings and immediately after input gaps."""
+        now = time.monotonic() if timestamp is None else timestamp
+        with self._lock:
+            if (
+                self._last_detection_at is not None
+                and now - self._last_detection_at >= REID_FRAME_GAP_SECONDS
+            ):
+                self._appearance_focus_until = max(
+                    self._appearance_focus_until,
+                    now + self.APPEARANCE_FOCUS_SECONDS,
+                )
+            active = [
+                track for track in self._identities.values()
+                if now - track.last_seen_at <= self.STALE_OUTPUT_SECONDS
+            ]
+            for left_index, left in enumerate(active):
+                left_box = left.predicted_box(now)
+                for right in active[left_index + 1:]:
+                    if _boxes_are_close(left_box, right.predicted_box(now)):
+                        self._appearance_focus_until = max(
+                            self._appearance_focus_until,
+                            now + self.APPEARANCE_FOCUS_SECONDS,
+                        )
+                        return True
+            return now <= self._appearance_focus_until
 
     def predict(
         self,
         *,
         timestamp: float | None = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> list[LocalTrack]:
-        """Return recent identities without feeding stale detections to BoT-SORT."""
+        """Predict display boxes without changing clean identity motion anchors."""
         now = time.monotonic() if timestamp is None else timestamp
         with self._lock:
-            return sorted(
+            tracks = sorted(
                 (
                     track for track in self._identities.values()
                     if now - track.last_seen_at <= self.STALE_OUTPUT_SECONDS
                 ),
                 key=lambda track: track.local_track_id,
             )
+            for track in tracks:
+                predicted = track.predicted_box(now)
+                if width is not None and height is not None:
+                    predicted[0] = min(max(0.0, predicted[0]), float(width))
+                    predicted[2] = min(max(0.0, predicted[2]), float(width))
+                    predicted[1] = min(max(0.0, predicted[1]), float(height))
+                    predicted[3] = min(max(0.0, predicted[3]), float(height))
+                    track.point = self._point(predicted, width, height)
+                track.box = predicted
+            return tracks
 
     def update(
         self,
@@ -470,12 +666,33 @@ class CameraPersonTracker:
                 })
 
             overlapping: set[int] = set()
+            nearby: set[int] = set()
             for left_index, left in enumerate(observations):
                 for right_index in range(left_index + 1, len(observations)):
-                    if _iou(left["box"], observations[right_index]["box"]) >= self.OVERLAP_FREEZE_IOU:
+                    right_box = observations[right_index]["box"]
+                    if _boxes_are_close(left["box"], right_box):
+                        nearby.update((left_index, right_index))
+                    if _iou(left["box"], right_box) >= self.OVERLAP_FREEZE_IOU:
                         overlapping.update((left_index, right_index))
 
-            assigned = self._assign_identities(observations, now, width, height)
+            frame_gap = (
+                self._last_detection_at is not None
+                and now - self._last_detection_at >= REID_FRAME_GAP_SECONDS
+            )
+            if nearby or overlapping or frame_gap:
+                self._appearance_focus_until = max(
+                    self._appearance_focus_until,
+                    now + self.APPEARANCE_FOCUS_SECONDS,
+                )
+            assigned, uncertain = self._assign_identities(
+                observations,
+                now,
+                width,
+                height,
+                overlapping,
+            )
+            if observations:
+                self._last_detection_at = now
             output: list[LocalTrack] = []
 
             for observation_index, observation in enumerate(observations):
@@ -510,7 +727,10 @@ class CameraPersonTracker:
                     )
                     self._identities[local_id] = track
                 else:
-                    track.update_motion(box, now)
+                    if observation_index in uncertain:
+                        track.update_uncertain_observation(box, now)
+                    else:
+                        track.update_motion(box, now)
                     track.confidence = observation["confidence"]
                     track.point = self._point(box, width, height)
                     track.missed = 0
@@ -518,7 +738,7 @@ class CameraPersonTracker:
                     track.update_embedding(
                         embedding,
                         quality,
-                        allow_gallery_update=observation_index not in overlapping,
+                        allow_gallery_update=observation_index not in uncertain,
                     )
 
                 output.append(track)
@@ -555,4 +775,7 @@ class CameraPersonTracker:
             self._identities.clear()
             self._bot_to_local.clear()
             self._active_ble_tags.clear()
+            self._pending_remaps.clear()
+            self._appearance_focus_until = 0.0
+            self._last_detection_at = None
             self._next_local_id = 1

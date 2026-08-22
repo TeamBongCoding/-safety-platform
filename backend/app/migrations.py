@@ -192,6 +192,8 @@ def _migrate_postgresql(engine) -> None:
                 if table_name not in existing_tables:
                     continue
                 for column_name, timezone_name in columns.items():
+                    if column_name not in existing_columns.get(table_name, set()):
+                        continue
                     row = conn.execute(text("""
                         SELECT data_type FROM information_schema.columns
                         WHERE table_schema = current_schema() AND table_name = :table_name

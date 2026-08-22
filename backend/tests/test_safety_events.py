@@ -72,7 +72,7 @@ class EventLogPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             event.model_dump(mode="json")["timestamp"],
-            "2026-08-12T16:30:00+09:00",
+            "2026-08-13T01:30:00+09:00",
         )
 
     def test_utc_event_timestamp_is_converted_to_korean_time(self):

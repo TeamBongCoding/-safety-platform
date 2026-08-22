@@ -67,6 +67,9 @@ FASTREID_WEIGHTS_PATH = (
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_MATCH_THRESHOLD = float(os.getenv("REID_MATCH_THRESHOLD", "0.72"))
 REID_GALLERY_SECONDS = float(os.getenv("REID_GALLERY_SECONDS", "120"))
+REID_SWITCH_MARGIN = float(os.getenv("REID_SWITCH_MARGIN", "0.10"))
+REID_SWITCH_CONFIRM_FRAMES = int(os.getenv("REID_SWITCH_CONFIRM_FRAMES", "3"))
+REID_FRAME_GAP_SECONDS = float(os.getenv("REID_FRAME_GAP_SECONDS", "0.45"))
 TRACK_BUFFER_FRAMES = int(os.getenv("TRACK_BUFFER_FRAMES", "90"))
 BLE_TAG_ACTIVE_SECONDS = float(os.getenv("BLE_TAG_ACTIVE_SECONDS", "20"))
 # ── Pose 행동 감지 ────────────────────────────────────────────────
@@ -75,7 +78,7 @@ POSE_MODEL_PATH = os.getenv("POSE_MODEL_PATH", "weights/yolo11n-pose.pt")
 DEBUG_POSE = os.getenv("DEBUG_POSE", "0") == "1"
 POSE_KEYPOINT_CONF = float(os.getenv("POSE_KEYPOINT_CONF", "0.4"))
 POSE_INFER_EVERY = int(os.getenv("POSE_INFER_EVERY", "2"))
-LIVE_INFER_EVERY = int(os.getenv("LIVE_INFER_EVERY", "3"))
+LIVE_INFER_EVERY = int(os.getenv("LIVE_INFER_EVERY", "2"))
 LIVE_POSE_INFER_EVERY = int(os.getenv("LIVE_POSE_INFER_EVERY", "6"))
 FALL_BBOX_RATIO = float(os.getenv("FALL_BBOX_RATIO", "1.2"))
 FALL_BODY_ANGLE = float(os.getenv("FALL_BODY_ANGLE", "40.0"))
