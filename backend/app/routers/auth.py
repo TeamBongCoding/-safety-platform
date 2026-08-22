@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..auth import require_user, start_session, user_from_token
 from ..config import (
+    DEMO_CLOSE_GRACE_SECONDS,
     DEMO_IDLE_MINUTES,
     DEMO_MAX_ACTIVE_SESSIONS,
-    DEMO_MAX_HOURS,
+    DEMO_MAX_MINUTES,
     SESSION_COOKIE_NAME,
 )
 from ..database import get_db
@@ -73,7 +74,7 @@ def start_demo(request: Request, response: Response, db: Session = Depends(get_d
             )
 
         demo_id = uuid4().hex
-        expires_at = now + timedelta(hours=DEMO_MAX_HOURS)
+        expires_at = now + timedelta(minutes=DEMO_MAX_MINUTES)
         user = User(
             email=f"demo-{demo_id}@internal.invalid",
             password_hash=secrets.token_urlsafe(48),
@@ -108,8 +109,23 @@ def me(user: User = Depends(require_user), db: Session = Depends(get_db)):
 @router.post("/heartbeat")
 def heartbeat(user: User = Depends(require_user), db: Session = Depends(get_db)):
     user.last_seen_at = utc_now()
+    user.cleanup_requested_at = None
     db.commit()
     return {"active": True, "expires_at": user.expires_at}
+
+
+@router.post("/demo/close")
+def schedule_demo_cleanup(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Schedule cleanup after a short grace period for refresh/reconnect."""
+    user.cleanup_requested_at = utc_now()
+    db.commit()
+    return {
+        "cleanup_pending": True,
+        "cleanup_in_seconds": DEMO_CLOSE_GRACE_SECONDS,
+    }
 
 
 @router.delete("/demo")

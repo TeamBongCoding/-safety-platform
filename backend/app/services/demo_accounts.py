@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import database
 from ..config import (
+    DEMO_CLOSE_GRACE_SECONDS,
     DEMO_IDLE_MINUTES,
     SUPABASE_CLIP_BUCKET,
     SUPABASE_DOCUMENT_BUCKET,
@@ -248,6 +249,7 @@ def purge_expired_demo_users(
     make_session = _factory(session_factory)
     now = utc_now()
     idle_cutoff = now - timedelta(minutes=DEMO_IDLE_MINUTES)
+    close_cutoff = now - timedelta(seconds=DEMO_CLOSE_GRACE_SECONDS)
     with make_session() as db:
         user_ids = list(db.scalars(
             select(User.id).where(
@@ -258,6 +260,7 @@ def purge_expired_demo_users(
                     User.expires_at <= now,
                     User.last_seen_at.is_(None),
                     User.last_seen_at <= idle_cutoff,
+                    User.cleanup_requested_at <= close_cutoff,
                 ),
             )
         ))

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import app.database as db_module
 from app.database import get_db
 from app.main import app
+from app.config import DEMO_CLOSE_GRACE_SECONDS, DEMO_MAX_MINUTES
 
 from app.database import Base
 from app.models import (
@@ -201,6 +202,18 @@ class DemoAccountCleanupTests(unittest.TestCase):
             self.assertIsNone(db.get(User, expired_user_id))
             self.assertIsNotNone(db.get(User, permanent_id))
 
+    @patch("app.services.demo_accounts._stop_site_services")
+    def test_close_request_older_than_grace_is_purged(self, _stop):
+        user_id, _site_id = self._create_demo()
+        with self.Session() as db:
+            user = db.get(User, user_id)
+            user.cleanup_requested_at = datetime.now() - timedelta(
+                seconds=DEMO_CLOSE_GRACE_SECONDS + 1
+            )
+            db.commit()
+
+        self.assertEqual(purge_expired_demo_users(session_factory=self.Session), 1)
+
 
 class DemoAuthAPITests(unittest.TestCase):
     def setUp(self):
@@ -242,6 +255,29 @@ class DemoAuthAPITests(unittest.TestCase):
             with self.Session() as db:
                 remaining_ids = set(db.scalars(select(User.id)))
             self.assertEqual(remaining_ids, {data_b["user"]["id"]})
+
+    def test_close_schedules_cleanup_and_reconnect_cancels_it(self):
+        with TestClient(app, base_url="https://testserver") as client:
+            response = client.post("/api/auth/demo")
+            self.assertEqual(response.status_code, 201)
+            user_id = response.json()["user"]["id"]
+
+            with self.Session() as db:
+                created_user = db.get(User, user_id)
+                self.assertEqual(
+                    created_user.expires_at - created_user.created_at,
+                    timedelta(minutes=DEMO_MAX_MINUTES),
+                )
+
+            close_response = client.post("/api/auth/demo/close")
+            self.assertEqual(close_response.status_code, 200)
+            self.assertEqual(close_response.json()["cleanup_in_seconds"], DEMO_CLOSE_GRACE_SECONDS)
+            with self.Session() as db:
+                self.assertIsNotNone(db.get(User, user_id).cleanup_requested_at)
+
+            self.assertEqual(client.get("/api/auth/me").status_code, 200)
+            with self.Session() as db:
+                self.assertIsNone(db.get(User, user_id).cleanup_requested_at)
 
 
 if __name__ == "__main__":

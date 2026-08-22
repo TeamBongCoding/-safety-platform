@@ -62,7 +62,12 @@ def user_from_token(token: str | None, db: Session) -> User | None:
         db.delete(login_session)
         db.commit()
         return None
-    if user.last_seen_at is None or user.last_seen_at < now - timedelta(minutes=1):
+    if user.cleanup_requested_at is not None:
+        # A refresh or another open tab proves that the client is still active.
+        user.cleanup_requested_at = None
+        user.last_seen_at = now
+        db.commit()
+    elif user.last_seen_at is None or user.last_seen_at < now - timedelta(minutes=1):
         user.last_seen_at = now
         db.commit()
     return user

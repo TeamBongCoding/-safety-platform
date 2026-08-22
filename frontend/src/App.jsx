@@ -79,6 +79,21 @@ function UserExperience({ session, setSession }) {
     }
   }, [setSession])
 
+  useEffect(() => {
+    const scheduleCleanup = (event) => {
+      if (event.persisted) return
+      const url = `${API_BASE}/api/auth/demo/close`
+      if (navigator.sendBeacon?.(url)) return
+      fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true,
+      }).catch(() => {})
+    }
+    window.addEventListener('pagehide', scheduleCleanup)
+    return () => window.removeEventListener('pagehide', scheduleCleanup)
+  }, [])
+
   return (
     <>
       <div hidden={screen !== 'dashboard'}>
@@ -123,8 +138,9 @@ function DemoStartScreen({ onStarted, initialError }) {
           <h2 className="text-lg font-semibold text-white">클라이언트 데모 모드</h2>
           <ul className="mt-4 space-y-2 text-sm text-slate-400">
             <li>• 다른 사용자와 분리된 새 임시 계정과 현장이 할당됩니다.</li>
-            <li>• 종료 버튼을 누르면 영상 분석 기록과 업로드 자료가 삭제됩니다.</li>
-            <li>• 30분 동안 활동이 없거나 시작 후 2시간이 지나면 자동 삭제됩니다.</li>
+            <li>• 창을 닫으면 삭제가 예약되며, 1분 안에 다시 접속하면 취소됩니다.</li>
+            <li>• 종료 버튼을 누르면 영상 분석 기록과 업로드 자료가 즉시 삭제됩니다.</li>
+            <li>• 5분 동안 요청이 없거나 시작 후 40분이 지나면 자동 삭제됩니다.</li>
           </ul>
           {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
           <button

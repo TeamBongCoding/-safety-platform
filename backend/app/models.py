@@ -35,6 +35,9 @@ class User(Base):
     is_ephemeral: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, index=True)
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, index=True)
+    cleanup_requested_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime, nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     suspended_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

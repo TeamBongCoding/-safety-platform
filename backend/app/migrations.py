@@ -40,6 +40,7 @@ def _migrate_sqlite(engine) -> None:
             ("is_ephemeral",    "ALTER TABLE users ADD COLUMN is_ephemeral BOOLEAN NOT NULL DEFAULT 0"),
             ("last_seen_at",    "ALTER TABLE users ADD COLUMN last_seen_at DATETIME"),
             ("expires_at",      "ALTER TABLE users ADD COLUMN expires_at DATETIME"),
+            ("cleanup_requested_at", "ALTER TABLE users ADD COLUMN cleanup_requested_at DATETIME"),
         ],
         "sites": [
             ("latitude",  "ALTER TABLE sites ADD COLUMN latitude FLOAT"),
@@ -91,6 +92,10 @@ def _migrate_sqlite(engine) -> None:
             conn.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_users_expires_at ON users (expires_at)"
             )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_users_cleanup_requested_at "
+                "ON users (cleanup_requested_at)"
+            )
         conn.exec_driver_sql("PRAGMA optimize")
 
 # ── PostgreSQL / Supabase ─────────────────────────────────────────────────────
@@ -110,6 +115,7 @@ def _migrate_postgresql(engine) -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_ephemeral BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS cleanup_requested_at TIMESTAMP WITH TIME ZONE",
         ],
         "sites": [
             "ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitude FLOAT",
@@ -175,7 +181,7 @@ def _migrate_postgresql(engine) -> None:
     # Normalize legacy naive timestamps to timezone-aware UTC. Existing rows are
     # interpreted according to the historical convention used by each column.
     timestamp_columns = {
-        "users": {"last_login_at": "UTC", "suspended_at": "UTC", "last_seen_at": "UTC", "expires_at": "UTC", "created_at": "UTC"},
+        "users": {"last_login_at": "UTC", "suspended_at": "UTC", "last_seen_at": "UTC", "expires_at": "UTC", "cleanup_requested_at": "UTC", "created_at": "UTC"},
         "sites": {"created_at": "UTC"},
         "login_sessions": {"expires_at": "UTC", "created_at": "UTC"},
         "admin_audit_logs": {"created_at": "UTC"},
@@ -228,6 +234,7 @@ def _migrate_postgresql(engine) -> None:
         ("knowledge_documents", "ix_knowledge_documents_site_id", "CREATE INDEX IF NOT EXISTS ix_knowledge_documents_site_id ON knowledge_documents (site_id)"),
         ("users", "ix_users_is_ephemeral", "CREATE INDEX IF NOT EXISTS ix_users_is_ephemeral ON users (is_ephemeral)"),
         ("users", "ix_users_expires_at", "CREATE INDEX IF NOT EXISTS ix_users_expires_at ON users (expires_at)"),
+        ("users", "ix_users_cleanup_requested_at", "CREATE INDEX IF NOT EXISTS ix_users_cleanup_requested_at ON users (cleanup_requested_at)"),
         ("document_chunks", "ix_document_chunks_document_id", "CREATE INDEX IF NOT EXISTS ix_document_chunks_document_id ON document_chunks (document_id)"),
     ]
     for table_name, index_name, stmt in index_stmts:

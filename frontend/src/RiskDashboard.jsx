@@ -212,9 +212,6 @@ function ReportTab({ onError, riskConfig }) {
   const citations = Array.from(
     new Map((llm?.citations || []).map((citation) => [citation.document_id, citation])).values(),
   )
-  const citationNumberByDocument = new Map(
-    citations.map((citation, index) => [citation.document_id, index + 1]),
-  )
   const citationByChunk = new Map(
     (llm?.citations || []).map((citation) => [citation.chunk_id, citation]),
   )
@@ -328,16 +325,21 @@ function ReportTab({ onError, riskConfig }) {
                   <ol className="space-y-2">
                     {llm.recommendations.map((rec, i) => {
                       const source = citationByChunk.get(rec.source_chunk_id)
-                      const citationNumber = source ? citationNumberByDocument.get(source.document_id) : null
                       const reason = rec.reason?.replace(/\s*\(출처:\s*chunk_id=\d+\)\s*$/i, '')
                       return (
                       <li key={i} className="flex gap-3 text-sm">
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-xs font-bold text-cyan-300">{rec.priority}</span>
                         <div>
                           <p className="font-medium text-slate-200">{rec.action}</p>
-                          <p className="text-slate-500">{rec.reason}</p>
+                          <p className="text-slate-500">{reason}</p>
                           {rec.source_chunk_id != null && (
-                            <p className="mt-0.5 text-xs font-medium text-cyan-400">문서 근거 [청크 {rec.source_chunk_id}]</p>
+                            <button
+                              type="button"
+                              onClick={() => showSource(rec.source_chunk_id, source?.title)}
+                              className="mt-0.5 text-xs font-medium text-cyan-400 hover:text-cyan-300 hover:underline"
+                            >
+                              문서 근거
+                            </button>
                           )}
                           {rec.source_chunk_id == null && rec.reason?.startsWith('[AI 자율 제안]') && (
                             <p className="mt-0.5 text-xs font-medium text-violet-400">AI 자율 제안</p>

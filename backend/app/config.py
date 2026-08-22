@@ -37,10 +37,11 @@ DATABASE_URL = normalize_database_url(
 )
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety_session")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
-DEMO_IDLE_MINUTES = max(1, int(os.getenv("DEMO_IDLE_MINUTES", "30")))
-DEMO_MAX_HOURS = max(1, int(os.getenv("DEMO_MAX_HOURS", "2")))
+DEMO_IDLE_MINUTES = max(1, int(os.getenv("DEMO_IDLE_MINUTES", "5")))
+DEMO_MAX_MINUTES = max(1, int(os.getenv("DEMO_MAX_MINUTES", "40")))
 DEMO_CLEANUP_INTERVAL_SECONDS = max(10, int(os.getenv("DEMO_CLEANUP_INTERVAL_SECONDS", "60")))
-DEMO_MAX_ACTIVE_SESSIONS = max(1, int(os.getenv("DEMO_MAX_ACTIVE_SESSIONS", "5")))
+DEMO_CLOSE_GRACE_SECONDS = max(10, int(os.getenv("DEMO_CLOSE_GRACE_SECONDS", "60")))
+DEMO_MAX_ACTIVE_SESSIONS = max(1, int(os.getenv("DEMO_MAX_ACTIVE_SESSIONS", "50")))
 CORS_ORIGINS = _csv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
